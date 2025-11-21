@@ -8,12 +8,12 @@ const [x,setX] = useState<number>(0);
 const [y,setY] = useState<number>(0);
 
   const fetch_mapdata = async () => {
-    const res = await fetch("http://localhost:810/mapdata");
+    const res = await fetch("http://localhost:8100/mapdata");
     const data = await res.json();
     setMapdata(data.mapdata);
   };
   const fetch_position = async () => {
-    const res = await fetch("http://localhost:810/position");
+    const res = await fetch("http://localhost:8100/position");
     const data = await res.json();
     setX(data.x);
     setY(data.y);

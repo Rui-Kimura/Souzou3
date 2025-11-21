@@ -32,8 +32,10 @@ TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
 DIST_THRESHOLD_MM = 40.0 # 目標点到達許容誤差
 
 # --- ピン設定 (動作確認済みのもの) ---
+L_EN = 19
 IN1 = 21 # LEFT_F
 IN2 = 20 # LEFT_B
+R_EN = 26
 IN3 = 16 # RIGHT_F
 IN4 = 12 # RIGHT_B
 FREQ = 100
@@ -208,18 +210,21 @@ class PathPlanner:
 # ======== 4. ハードウェア制御用関数 ========
 
 # PWMインスタンス (グローバル)
-p1, p2, p3, p4 = None, None, None, None
+p1, p2, p3, p4, len, ren = None, None, None, None, None, None
 
 def setup_hardware():
-    global p1, p2, p3, p4
+    global p1, p2, p3, p4, len, ren
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BCM)
-    pins = [IN1, IN2, IN3, IN4]
+    pins = [IN1, IN2, IN3, IN4, L_EN, R_EN]
     for pin in pins:
         GPIO.setup(pin, GPIO.OUT)
     
     p1 = GPIO.PWM(IN1, FREQ); p2 = GPIO.PWM(IN2, FREQ)
     p3 = GPIO.PWM(IN3, FREQ); p4 = GPIO.PWM(IN4, FREQ)
+    GPIO.output(L_EN, GPIO.OUT)
+    GPIO.output(R_EN, GPIO.OUT)
+    
     p1.start(0); p2.start(0); p3.start(0); p4.start(0)
 
 def set_motor_speed(left_speed, right_speed):
