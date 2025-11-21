@@ -26,8 +26,8 @@ INFLATION_RADIUS = 6
 # --- モーター制御設定 ---
 BASE_SPEED = 40.0
 TURN_SPEED = 30.0
-KP_DIST = 1.5  # 直進補正ゲイン
-KP_TURN = 1.2  # 回転制御ゲイン
+KP_DIST = -1.5  # 直進補正ゲイン
+KP_TURN = -1.2  # 回転制御ゲイン
 TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
 DIST_THRESHOLD_MM = 40.0 # 目標点到達許容誤差
 
