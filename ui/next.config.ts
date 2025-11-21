@@ -1,11 +1,28 @@
 import type { NextConfig } from "next";
+import { networkInterfaces } from "os";
 
-module.exports = {
-  allowedDevOrigins: ['local-origin.dev', '*.local-origin.dev'],
-}
+const getLocalIpAddresses = (): string[] => {
+  const nets = networkInterfaces();
+  const results: string[] = [];
+
+  for (const name of Object.keys(nets)) {
+    const netInterface = nets[name];
+    if (netInterface) {
+      for (const net of netInterface) {
+        if (net.family === 'IPv4' && !net.internal) {
+          results.push(net.address);
+        }
+      }
+    }
+  }
+  return results;
+};
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  allowedDevOrigins: [
+    "localhost:8100", 
+    ...getLocalIpAddresses()
+  ],
 };
 
 export default nextConfig;
