@@ -222,8 +222,8 @@ def setup_hardware():
     
     p1 = GPIO.PWM(IN1, FREQ); p2 = GPIO.PWM(IN2, FREQ)
     p3 = GPIO.PWM(IN3, FREQ); p4 = GPIO.PWM(IN4, FREQ)
-    GPIO.output(L_EN, GPIO.OUT)
-    GPIO.output(R_EN, GPIO.OUT)
+    GPIO.output(L_EN, GPIO.HIGH)
+    GPIO.output(R_EN, GPIO.HIGH)
     
     p1.start(0); p2.start(0); p3.start(0); p4.start(0)
 
