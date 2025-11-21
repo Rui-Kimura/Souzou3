@@ -378,7 +378,7 @@ def main():
         planner = PathPlanner(RAW_MAP_DATA, inflation_r=INFLATION_RADIUS)
         
         def run_api():
-            uvicorn.run(app, host="0.0.0.0", port=8000, log_level="debug")
+            uvicorn.run(app, host="0.0.0.0", port=810, log_level="debug")
         
         # 7. スレッドを作成し、デーモンとして（メイン終了時に自動終了）起動
         api_thread = threading.Thread(target=run_api, daemon=True)
