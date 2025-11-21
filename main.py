@@ -210,10 +210,10 @@ class PathPlanner:
 # ======== 4. ハードウェア制御用関数 ========
 
 # PWMインスタンス (グローバル)
-p1, p2, p3, p4, len, ren = None, None, None, None, None, None
+p1, p2, p3, p4 = None, None, None, None
 
 def setup_hardware():
-    global p1, p2, p3, p4, len, ren
+    global p1, p2, p3, p4
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BCM)
     pins = [IN1, IN2, IN3, IN4, L_EN, R_EN]
