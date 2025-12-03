@@ -363,6 +363,7 @@ def control_api(
     speed: float,     
     angle: float      
 ):
+    global manual_control, manual_speed, manual_direction, manual_angle
     manual_direction = direction
     manual_speed = speed / 5.0
     manual_angle = angle
@@ -373,6 +374,7 @@ def control_api(
 
 @app.get("/set_manual_mode")
 def manual_mode(mode:bool):
+    global manual_control
     manual_control = bool(mode)
     return{
         "manual_control": manual_control
@@ -431,16 +433,14 @@ def main():
             while(manual_control):
                 if(manual_direction != 0):
                     if(manual_speed < 0):
-                        manual_left = 100
-                        manual_right = 100
+                        manual_left = 0
+                        manual_right = 0
                     elif(manual_direction > 0):
-                        manual_left = manual_speed*((100-manual_angle)/2)
-                        manual_right = manual_speed*((100+manual_angle)/2)
+                        manual_left = manual_speed*((100.0-manual_angle)/2.0)
+                        manual_right = manual_speed*((100.0+manual_angle)/2.0)
                     else:
-                        manual_left = manual_speed*((100-manual_angle)/2)
-                        manual_right = manual_speed*((100+manual_angle)/2)
-                    manual_left = 0
-                    manual_right = 0
+                        manual_left = -manual_speed*((100.0-manual_angle)/2.0)
+                        manual_right = -manual_speed*((100.0+manual_angle)/2.0)
                 else:
                     manual_right = 0
                     manual_left = 0
