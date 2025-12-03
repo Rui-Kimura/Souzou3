@@ -106,6 +106,27 @@ export default function ControllerApp() {
         }
     };
 
+    const openSlide = async () => {
+        try {
+            await fetch(API_HOST + `/slide?mode=open`, {
+                method: 'GET'
+            });
+        } catch (error) {
+            console.error('Failed to set manual mode:', error);
+        }
+    }
+
+    const closeSlide = async () => {
+        try {
+            await fetch(API_HOST + `/slide?mode=close`, {       
+                method: 'GET'
+            });
+        }
+        catch (error) {
+            console.error('Failed to set manual mode:', error);
+        }
+    }
+
     const up_startPress = () => {
         upLinear();
     };
@@ -121,6 +142,8 @@ export default function ControllerApp() {
     const down_stopPress = () => {
         stopLinear();
     };
+
+
 
     /*操作画面を閉じるときは停止し制御を切る*/
     const handleBeforeUnload = async () => {
@@ -236,11 +259,7 @@ export default function ControllerApp() {
                                     marginBottom: 1,
                                     fontSize: '1.2rem'
                                 }}
-                                onMouseDown={up_startPress}  
-                                onMouseUp={up_stopPress}     
-                                onMouseLeave={up_stopPress}  
-                                onTouchStart={up_startPress} 
-                                onTouchEnd={up_stopPress}   
+                                onClick={openSlide}  
                             >
                                 展
                             </Fab>
@@ -255,11 +274,7 @@ export default function ControllerApp() {
                                     marginTop: 1,
                                     fontSize: '1.2rem'
                                 }}
-                                onMouseDown={down_startPress}  
-                                onMouseUp={down_stopPress}     
-                                onMouseLeave={down_stopPress}  
-                                onTouchStart={down_startPress} 
-                                onTouchEnd={down_stopPress}   
+                                onClick={closeSlide}  
                             >
                                 収
                             </Fab>

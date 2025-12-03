@@ -40,6 +40,10 @@ IN3 = 16 # RIGHT_F
 IN4 = 12 # RIGHT_B
 FREQ = 100
 
+# --- リニアアクチュエータ ピン ---
+LINEAR_IN1 = 5
+LINEAR_IN2 = 6
+
 # --- センサー設定 ---
 SENSOR_HEIGHT_MM = 95.0
 PIXEL_TO_MM = 0.0017 * SENSOR_HEIGHT_MM
@@ -74,6 +78,7 @@ manual_control = False
 manual_speed = 0.0
 manual_direction = 0.0
 manual_angle = 0.0
+manual_liniar = 0
 
 # ======== 3. クラス定義 ========
 
@@ -220,9 +225,10 @@ def setup_hardware():
     global p1, p2, p3, p4
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BCM)
-    pins = [IN1, IN2, IN3, IN4, L_EN, R_EN]
+    pins = [IN1, IN2, IN3, IN4, L_EN, R_EN, LINEAR_IN1, LINEAR_IN2]
     for pin in pins:
         GPIO.setup(pin, GPIO.OUT)
+        GPIO.output(pin, GPIO.LOW)
     
     p1 = GPIO.PWM(IN1, FREQ); p2 = GPIO.PWM(IN2, FREQ)
     p3 = GPIO.PWM(IN3, FREQ); p4 = GPIO.PWM(IN4, FREQ)
@@ -337,6 +343,17 @@ def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     set_motor_speed(0, 0)
     return True
 
+def move_linear(status):
+    if(status==1):  #上昇
+        GPIO.output(LINEAR_IN1, GPIO.HIGH)
+        GPIO.output(LINEAR_IN2, GPIO.LOW)
+    elif(status==-1): #下降
+        GPIO.output(LINEAR_IN1, GPIO.LOW)
+        GPIO.output(LINEAR_IN2, GPIO.HIGH)
+    else: #STOP
+        GPIO.output(LINEAR_IN1, GPIO.LOW)
+        GPIO.output(LINEAR_IN2, GPIO.LOW)
+
 # localhost api
 app = FastAPI()
 
@@ -380,6 +397,17 @@ def manual_mode(mode:bool):
         "manual_control": manual_control
     }
 
+@app.get("/linear")
+def linear_move(mode:str):
+    if(mode=="up"):
+        manual_liniar = 1
+    elif(mode=="down"):
+        manual_liniar = -1
+    else: #STOP
+        manual_liniar = 0
+    return{
+        "linear": manual_liniar
+    }
 
 
 def main():
@@ -428,23 +456,30 @@ def main():
         
         # 移動開始
         # move_to_target(planner, robot, bno, pmw, target_grid)
-        # 手動コントロール用
-        while True:
+        
+        OP_QUEUE = []
+        while True: #主ループ
+            
+
+
+            # 手動コントロール用
             while(manual_control):
                 if(manual_direction != 0):
                     if(manual_speed < 0):
                         manual_left = 0
                         manual_right = 0
-                    elif(manual_direction > 0):
-                        manual_left = manual_speed*((100.0-manual_angle)/2.0)
-                        manual_right = manual_speed*((100.0+manual_angle)/2.0)
-                    else:
-                        manual_left = -manual_speed*((100.0-manual_angle)/2.0)
-                        manual_right = -manual_speed*((100.0+manual_angle)/2.0)
+                    elif(manual_direction == 1 | manual_direction == -1):
+                        if(manual_angle > 0): #右曲がり
+                            manual_left = manual_direction * manual_speed * (100 - manual_angle)
+                            manual_right = manual_direction * manual_speed * 100
+                        elif(manual_angle <= 0): #左曲がり
+                            manual_left = manual_direction * manual_speed * 100
+                            manual_right = manual_direction * manual_speed * (100 + manual_angle)
                 else:
                     manual_right = 0
                     manual_left = 0
 
+                move_linear(manual_liniar)
                 set_motor_speed(manual_left, manual_right)
                 continue
 
