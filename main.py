@@ -70,6 +70,11 @@ RAW_MAP_DATA = [
     "1111111111111111111111111111111111111111"
 ]
 
+manual_control = False
+manual_speed = 0.0
+manual_direction = 0.0
+manual_angle = 0.0
+
 # ======== 3. クラス定義 ========
 
 class RobotState:
@@ -133,7 +138,6 @@ class PathPlanner:
         return np.array(grid)
 
     def _create_cost_map(self):
-        """障害物を膨張させたコストマップを作成 (1=進入禁止)"""
         cost_map = self.grid.copy()
         rows, cols = cost_map.shape
         
@@ -151,7 +155,7 @@ class PathPlanner:
         return cost_map
 
     def get_path_astar(self, start_grid, goal_grid):
-        """A*アルゴリズムによる経路探索"""
+        # A*アルゴリズムで経路探索
         start = tuple(start_grid)
         goal = tuple(goal_grid)
 
@@ -353,50 +357,86 @@ async def position():
 async def mapdata():
     return{"mapdata":RAW_MAP_DATA}
 
+@app.get("/controll_api")
+def control_api(
+    direction: int, 
+    speed: float,     
+    angle: float      
+):
+    print(f"受信データ: direction={direction}, speed={speed}, angle={angle}")
+
+    return {
+        "status": "controlled"
+    }
+
 def main():
     try:
         setup_hardware()
-        
-        # センサー初期化 (以前のコード同様)
         i2c = board.I2C()
         bno = adafruit_bno055.BNO055_I2C(i2c, address=0x29)
+        if os.path.exists(PROFILE_FILE):
+            with open(PROFILE_FILE, "r") as f:
+                saved_offsets = json.load(f)
+            bno.offsets_accelerometer = tuple(saved_offsets["accel"])
+            bno.offsets_gyroscope = tuple(saved_offsets["gyro"])
+            bno.offsets_magnetometer = tuple(saved_offsets["mag"])
+            time.sleep(0.05)
+            print("BNOプロファイルを読み込みました。")
+        else:
+            print(f"警告: {PROFILE_FILE} が見つかりません。")
+        
         bno.mode = adafruit_bno055.NDOF_MODE
-        # (キャリブレーション読み込み省略、必要なら追加してください)
         time.sleep(1)
         
         pmw = PMW3901()
 
-        # 初期状態取得
         start_heading = get_bno_heading(bno)
         if start_heading is None:
             print("BNOエラー")
             return
 
-        # マップマネージャーとロボット状態の初期化
         start_x_grid = 7
         start_y_grid = 7
         
         global robot
         robot = RobotState(start_x_grid, start_y_grid, start_heading)
         
-        # プランナー初期化 (マップ解析と膨張処理)
         planner = PathPlanner(RAW_MAP_DATA, inflation_r=INFLATION_RADIUS)
         
         def run_api():
             uvicorn.run(app, host="0.0.0.0", port=8100, log_level="debug")
         
-        # 7. スレッドを作成し、デーモンとして（メイン終了時に自動終了）起動
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
+        
+        #target_grid = (10, 10) 
 
-        # 目標地点の入力 (例: マップ右下付近へ)
-        # マップのサイズを確認して有効な座標を指定してください
-        target_grid = (10, 10) 
-
-        print(f"現在地: ({robot.x:.1f}, {robot.y:.1f}) Heading:{robot.heading:.1f}")
+        #print(f"現在地: ({robot.x:.1f}, {robot.y:.1f}) Heading:{robot.heading:.1f}")
         
         # 移動開始
-        move_to_target(planner, robot, bno, pmw, target_grid)
+        # move_to_target(planner, robot, bno, pmw, target_grid)
+        # 手動コントロール用
+        while True:
+            while(manual_control):
+                if(manual_direction != 0):
+                    if(manual_speed < 0):
+                        manual_left = 100
+                        manual_right = 100
+                    elif(manual_direction > 0):
+                        manual_left = manual_speed*((100-manual_angle)/2)
+                        manual_right = manual_speed*((100+manual_angle)/2)
+                    else:
+                        manual_left = manual_speed*((100-manual_angle)/2)
+                        manual_right = manual_speed*((100+manual_angle)/2)
+                    manual_left = 0
+                    manual_right = 0
+                else:
+                    manual_right = 0
+                    manual_left = 0
+
+                set_motor_speed(manual_left, manual_right)
+                continue
+
 
     except KeyboardInterrupt:
         print("\n停止")
