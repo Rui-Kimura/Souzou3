@@ -363,11 +363,22 @@ def control_api(
     speed: float,     
     angle: float      
 ):
-    print(f"受信データ: direction={direction}, speed={speed}, angle={angle}")
-
+    manual_direction = direction
+    manual_speed = speed / 5.0
+    manual_angle = angle
+    print(f"受信データ: direction={direction}, speed={manual_speed}, angle={angle}")
     return {
         "status": "controlled"
     }
+
+@app.get("/set_manual_mode")
+def manual_mode(mode:bool):
+    manual_control = bool(mode)
+    return{
+        "manual_control": manual_control
+    }
+
+
 
 def main():
     try:

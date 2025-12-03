@@ -3,6 +3,9 @@ import {  styled } from '@mui/material/styles';
 import Slider from '@mui/material/Slider';
 import Box from '@mui/material/Box';
 import Paper from '@mui/material/Paper';
+import { createTheme, ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import Switch from '@mui/material/Switch';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -351,12 +354,10 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
     };
   }, [isDragging]);
 
-  // マウント前はプレースホルダーを表示（SSRとの不整合防止）
   if (!isMounted) {
     return <Box sx={{ width: 360, height: 240, ...sx }} />;
   }
 
-  // 目盛り線の生成
   const renderTicks = () => {
     const ticks = [];
     const step = 12.5;
@@ -381,7 +382,6 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
         />
       );
 
-      // ラベル描画
       if (Math.abs(v) === 100 || v === 0) {
         const textRadius = HANDLE_RADIUS - 45;
         const tx = CENTER_X + Math.cos(angle) * textRadius;
@@ -430,7 +430,7 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
         onTouchStart={onTouchStart}
         style={{ 
           cursor: isDragging ? 'grabbing' : 'grab', 
-          touchAction: 'none', // スクロール等のタッチアクション無効化
+          touchAction: 'none', 
           display: 'block'
         }}
       >
@@ -484,6 +484,49 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
     </Box>
   );
 };
+
+export const MechanicalSwitch = styled(Switch)(({ theme }) => ({
+  width: 68,
+  height: 34,
+  padding: 0,
+  '& .MuiSwitch-switchBase': {
+    padding: 0,
+    margin: 4,
+    transitionDuration: '200ms',
+    borderRadius: 0, 
+    '&.Mui-checked': {
+      transform: 'translateX(34px)',
+      '& .MuiSwitch-thumb': {
+         backgroundColor: '#424242', 
+         border: '1px solid #212121',
+      },
+      '& + .MuiSwitch-track': {
+        backgroundColor: '#9e9e9e', 
+        opacity: 1,
+        border: '1px solid #757575',
+      },
+    },
+  },
+  '& .MuiSwitch-thumb': {
+    boxSizing: 'border-box',
+    width: 26,
+    height: 26,
+    borderRadius: 0, 
+    backgroundColor: '#e0e0e0', 
+    border: '1px solid #9e9e9e', 
+    boxShadow: 'none', 
+  },
+  '& .MuiSwitch-track': {
+    borderRadius: 0, 
+    backgroundColor: '#cfcfcf', 
+    opacity: 1,
+    border: '1px solid #9e9e9e',
+    transition: theme.transitions.create(['background-color'], {
+      duration: 200,
+    }),
+  },
+}));
+
 
 function useLocalState(arg0: boolean): [any, any] {
   throw new Error('Function not implemented.');
