@@ -62,6 +62,9 @@ manual_direction = 0.0
 manual_angle = 0.0
 manual_liniar = 0
 
+# 排他制御用ロック (位置情報の更新と読み取りが競合しないようにする)
+position_lock = threading.Lock()
+
 # ======== 3. クラス定義 ========
 
 class RobotState:
@@ -249,11 +252,30 @@ def get_bno_heading(sensor):
 
 # ======== 5. メイン移動ロジック ========
 
+def monitor_position(robot_instance, bno_sensor, pmw_sensor):
+    """並列スレッドで常に位置情報を更新し続ける"""
+    while True:
+        # センサー読み取り
+        h = get_bno_heading(bno_sensor)
+        try:
+            # get_motion()は呼び出すとレジスタがクリアされるため、ここで一度だけ呼ぶ
+            dx, dy = pmw_sensor.get_motion()
+        except:
+            dx, dy = 0, 0
+        
+        # ロックを取得して更新
+        with position_lock:
+            robot_instance.update(h, dx, dy)
+        
+        # CPU負荷軽減のため少し待つ
+        time.sleep(0.02)
+
 def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     """現在地から目標グリッドまでの経路を計算して移動"""
     
     # 1. 現在のグリッド座標を取得
-    start_grid = robot.get_grid_pos()
+    with position_lock:
+        start_grid = robot.get_grid_pos()
     print(f"経路計画開始: {start_grid} -> {target_grid_pos}")
 
     # 2. A*で経路計算
@@ -277,17 +299,18 @@ def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
 
         # --- ウェイポイント到達ループ ---
         while True:
-            # センサー更新
-            h = get_bno_heading(sensor_bno)
-            try:
-                dx, dy = sensor_pmw.get_motion()
-            except:
-                dx, dy = 0, 0
-            robot.update(h, dx, dy)
+            # センサー更新は monitor_position スレッドで行っているため、ここでは行わない
+            # robot.update(h, dx, dy) は削除
+            
+            # ロックをして最新の座標を取得
+            with position_lock:
+                current_x = robot.x
+                current_y = robot.y
+                current_heading = robot.heading
 
             # 目標までの距離と角度を計算
-            dx_global = target_x_mm - robot.x
-            dy_global = target_y_mm - robot.y
+            dx_global = target_x_mm - current_x
+            dy_global = target_y_mm - current_y
             distance = math.sqrt(dx_global**2 + dy_global**2)
             
             # 到達判定
@@ -297,16 +320,12 @@ def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
                 break
 
             # 目標方位 (atan2は math.atan2(y, x))
-            # マップ系: Y下向き, X右向き。0度=上。
-            # ベクトル角度 = atan2(dy, dx) だが、Y軸反転とHeadingの定義に合わせる
-            # Heading 0: (0, -1), 90: (1, 0)
-            # target_angle = atan2(dx, -dy) (度数法変換)
             target_angle_rad = math.atan2(dx_global, -dy_global) 
             target_angle_deg = math.degrees(target_angle_rad)
             if target_angle_deg < 0: target_angle_deg += 360
 
             # 回転必要量
-            heading_diff = (target_angle_deg - robot.heading + 180) % 360 - 180
+            heading_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
             # --- 制御ロジック ---
             # 1. 角度ズレが大きい場合は、その場で回転
@@ -357,7 +376,9 @@ async def root():
     return {"message":"Hello World"}
 @app.get("/position")
 async def position():
-    return {"x":robot.x,"y":robot.y}
+    # API呼び出し時もロックを使って安全に読み取る
+    with position_lock:
+        return {"x":robot.x,"y":robot.y}
 @app.get("/mapdata")
 async def mapdata():
     return{"mapdata":RAW_MAP_DATA}
@@ -433,6 +454,11 @@ def main():
         
         planner = PathPlanner(RAW_MAP_DATA, inflation_r=INFLATION_RADIUS)
         
+        # --- 位置監視用スレッドの開始 ---
+        monitor_thread = threading.Thread(target=monitor_position, args=(robot, bno, pmw), daemon=True)
+        monitor_thread.start()
+        print("位置監視システムを開始しました。")
+
         def run_api():
             uvicorn.run(app, host="0.0.0.0", port=8100, log_level="debug")
         
