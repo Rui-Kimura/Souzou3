@@ -56,6 +56,8 @@ RAW_MAP_DATA = []
 with open(MAP_DATA_PATH, "r") as f:
     RAW_MAP_DATA = [line.rstrip() for line in f]
 
+target_grid = (10, 10)  # 目標グリッド座標 (x, y)
+
 manual_control = False
 manual_speed = 0.0
 manual_direction = 0.0
@@ -376,7 +378,6 @@ async def root():
     return {"message":"Hello World"}
 @app.get("/position")
 async def position():
-    # API呼び出し時もロックを使って安全に読み取る
     with position_lock:
         return {"x":robot.x,"y":robot.y}
 @app.get("/mapdata")
@@ -465,7 +466,7 @@ def main():
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
         
-        #target_grid = (10, 10) 
+        #global target_grid = (10, 10) 
 
         #print(f"現在地: ({robot.x:.1f}, {robot.y:.1f}) Heading:{robot.heading:.1f}")
         
@@ -506,11 +507,11 @@ def main():
         #END WHILE(True)
     #END TRY
 
-
     except KeyboardInterrupt:
         print("\n停止")
     finally:
         set_motor_speed(0, 0)
+        move_linear(0)
         GPIO.cleanup()
 
 if __name__ == "__main__":
