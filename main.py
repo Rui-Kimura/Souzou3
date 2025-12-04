@@ -449,8 +449,6 @@ def main():
         OP_QUEUE = []
         while True: #主ループ
             EB = False
-
-
             # 手動コントロール用
             while(manual_control):
                 if(manual_direction != 0):
@@ -458,20 +456,29 @@ def main():
                         manual_left = 0
                         manual_right = 0
                         EB = True
-                    elif(manual_direction == 1 | manual_direction == -1):
+                    elif(manual_direction == 1 or manual_direction == -1):
+                        EB = False
                         if(manual_angle > 0): #右曲がり
-                            manual_left = manual_direction * manual_speed * (100 - manual_angle)
+                            manual_left = 100,manual_direction * manual_speed * (100 - manual_angle)
                             manual_right = manual_direction * manual_speed * 100
                         elif(manual_angle <= 0): #左曲がり
                             manual_left = manual_direction * manual_speed * 100
                             manual_right = manual_direction * manual_speed * (100 + manual_angle)
+                        #END IF
+                    #END IF
                 else:
                     manual_right = 0
                     manual_left = 0
+                #END IF
 
                 set_motor_speed(manual_left, manual_right,EB)
                 move_linear(manual_liniar)
                 continue
+            #END WHILE(manual_control)
+            time.sleep(0.05)
+            continue
+        #END WHILE(True)
+    #END TRY
 
 
     except KeyboardInterrupt:
