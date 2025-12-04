@@ -56,12 +56,15 @@ RAW_MAP_DATA = []
 with open(MAP_DATA_PATH, "r") as f:
     RAW_MAP_DATA = [line.rstrip() for line in f]
 
+target_grid = (10, 10, 0)
+
 manual_control = False
 manual_speed = 0.0
 manual_direction = 0.0
 manual_angle = 0.0
 manual_liniar = 0
 
+planner = None
 # 排他制御用ロック (位置情報の更新と読み取りが競合しないようにする)
 position_lock = threading.Lock()
 
@@ -270,7 +273,7 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
         # CPU負荷軽減のため少し待つ
         time.sleep(0.02)
 
-def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
+def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     """現在地から目標グリッドまでの経路を計算して移動。target_grid_pos=(x, y, angle)"""
     
     # 目標情報 (x, y) と オプションの角度 (angle) を分離
@@ -287,7 +290,7 @@ def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     print(f"経路計画開始: {start_grid} -> {goal_grid} (Heading: {target_angle})")
 
     # 2. A*で経路計算
-    path = planner.get_path_astar(start_grid, goal_grid)
+    path = _planner.get_path_astar(start_grid, goal_grid)
     
     if not path:
         print("エラー: 経路が見つかりません。")
@@ -411,6 +414,18 @@ async def position():
 async def mapdata():
     return{"mapdata":RAW_MAP_DATA}
 
+@app.get("/costmapdata")
+async def costmapdata():
+    return{"mapdata":planner.cost_map}
+
+@app.get("/target_point")
+async def target_point():
+    return{
+        "x" : target_grid[0],
+        "y" : target_grid[1],
+        "angle" : target_grid[2]
+    }
+
 @app.get("/controll_api")
 def control_api(
     direction: int, 
@@ -479,7 +494,7 @@ def main():
         
         global robot
         robot = RobotState(start_x_grid, start_y_grid, start_heading)
-        
+        global planner
         planner = PathPlanner(RAW_MAP_DATA, inflation_r=INFLATION_RADIUS)
         
         # --- 位置監視用スレッドの開始 ---
@@ -494,7 +509,7 @@ def main():
         api_thread.start()
         
         # target_gridは (x, y) または (x, y, angle) で指定
-        # target_grid = (10, 10, 180) 
+        # global target_grid = (10, 10, 180) 
 
         #print(f"現在地: ({robot.x:.1f}, {robot.y:.1f}) Heading:{robot.heading:.1f}")
         
