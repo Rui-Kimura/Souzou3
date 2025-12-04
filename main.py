@@ -56,8 +56,6 @@ RAW_MAP_DATA = []
 with open(MAP_DATA_PATH, "r") as f:
     RAW_MAP_DATA = [line.rstrip() for line in f]
 
-target_grid = (10, 10)  # 目標グリッド座標 (x, y)
-
 manual_control = False
 manual_speed = 0.0
 manual_direction = 0.0
@@ -273,15 +271,23 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
         time.sleep(0.02)
 
 def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
-    """現在地から目標グリッドまでの経路を計算して移動"""
+    """現在地から目標グリッドまでの経路を計算して移動。target_grid_pos=(x, y, angle)"""
     
+    # 目標情報 (x, y) と オプションの角度 (angle) を分離
+    target_angle = None
+    if len(target_grid_pos) == 3:
+        target_x, target_y, target_angle = target_grid_pos
+        goal_grid = (target_x, target_y)
+    else:
+        goal_grid = target_grid_pos
+
     # 1. 現在のグリッド座標を取得
     with position_lock:
         start_grid = robot.get_grid_pos()
-    print(f"経路計画開始: {start_grid} -> {target_grid_pos}")
+    print(f"経路計画開始: {start_grid} -> {goal_grid} (Heading: {target_angle})")
 
     # 2. A*で経路計算
-    path = planner.get_path_astar(start_grid, target_grid_pos)
+    path = planner.get_path_astar(start_grid, goal_grid)
     
     if not path:
         print("エラー: 経路が見つかりません。")
@@ -301,8 +307,7 @@ def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
 
         # --- ウェイポイント到達ループ ---
         while True:
-            # センサー更新は monitor_position スレッドで行っているため、ここでは行わない
-            # robot.update(h, dx, dy) は削除
+            # センサー更新は monitor_position スレッドで行っている
             
             # ロックをして最新の座標を取得
             with position_lock:
@@ -348,8 +353,29 @@ def move_to_target(planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
             
             time.sleep(0.02)
 
-    print("目標地点に到着しました。")
+    print("目標地点座標に到着しました。")
     set_motor_speed(0, 0)
+
+    # 4. 最終角度への回転 (指定がある場合)
+    if target_angle is not None:
+        print(f"最終角度調整: {target_angle}度 へ回転します")
+        while True:
+            with position_lock:
+                current_heading = robot.heading
+            
+            heading_diff = (target_angle - current_heading + 180) % 360 - 180
+            
+            if abs(heading_diff) <= TURN_THRESHOLD_DEG:
+                print("最終角度到達")
+                set_motor_speed(0, 0)
+                break
+            
+            turn_pow = KP_TURN * heading_diff
+            if turn_pow > 0: turn_pow = max(turn_pow, 25)
+            else: turn_pow = min(turn_pow, -25)
+            set_motor_speed(-turn_pow, turn_pow)
+            time.sleep(0.02)
+
     return True
 
 def move_linear(status):
@@ -378,6 +404,7 @@ async def root():
     return {"message":"Hello World"}
 @app.get("/position")
 async def position():
+    # API呼び出し時もロックを使って安全に読み取る
     with position_lock:
         return {"x":robot.x,"y":robot.y}
 @app.get("/mapdata")
@@ -466,7 +493,8 @@ def main():
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
         
-        #global target_grid = (10, 10) 
+        # target_gridは (x, y) または (x, y, angle) で指定
+        # target_grid = (10, 10, 180) 
 
         #print(f"現在地: ({robot.x:.1f}, {robot.y:.1f}) Heading:{robot.heading:.1f}")
         
@@ -507,11 +535,11 @@ def main():
         #END WHILE(True)
     #END TRY
 
+
     except KeyboardInterrupt:
         print("\n停止")
     finally:
         set_motor_speed(0, 0)
-        move_linear(0)
         GPIO.cleanup()
 
 if __name__ == "__main__":
