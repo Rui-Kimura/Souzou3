@@ -54,7 +54,7 @@ PROFILE_FILE = "bno_profile.json"
 MAP_DATA_PATH = "room.dat"
 RAW_MAP_DATA = []
 with open(MAP_DATA_PATH, "r") as f:
-    RAW_MAP_DATA = [line.rstrip for line in f]
+    RAW_MAP_DATA = [line.rstrip() for line in f]
 
 manual_control = False
 manual_speed = 0.0
@@ -387,6 +387,7 @@ def manual_mode(mode:bool):
 
 @app.get("/linear")
 def linear_move(mode:str):
+    global manual_liniar
     if(mode=="up"):
         manual_liniar = 1
     elif(mode=="down"):
