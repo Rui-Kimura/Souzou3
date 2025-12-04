@@ -21,7 +21,7 @@ ROBOT_WIDTH_MM = 400.0   # 筐体幅
 ROBOT_DEPTH_MM = 350.0   # 筐体奥行
 # 障害物膨張半径 (ロボットの半径 / グリッドサイズ) 
 # 半径 約270mm / 50mm = 5.4 -> 切り上げ+余裕で 6マス
-INFLATION_RADIUS = 6     
+INFLATION_RADIUS = 6      
 
 # --- モーター制御設定 ---
 BASE_SPEED = 40.0
@@ -53,8 +53,13 @@ PROFILE_FILE = "bno_profile.json"
 
 MAP_DATA_PATH = "room.dat"
 RAW_MAP_DATA = []
-with open(MAP_DATA_PATH, "r") as f:
-    RAW_MAP_DATA = [line.rstrip() for line in f]
+# ファイルが存在しない場合のエラー回避用ダミーデータ（必要に応じて修正してください）
+if os.path.exists(MAP_DATA_PATH):
+    with open(MAP_DATA_PATH, "r") as f:
+        RAW_MAP_DATA = [line.rstrip() for line in f]
+else:
+    # デフォルトのダミーマップ（テスト用）
+    RAW_MAP_DATA = ["0"*20 for _ in range(20)]
 
 target_grid = (10, 10, 0)
 
@@ -409,14 +414,20 @@ async def root():
 async def position():
     # API呼び出し時もロックを使って安全に読み取る
     with position_lock:
-        return {"x":robot.x,"y":robot.y}
+        if robot:
+            return {"x":robot.x,"y":robot.y}
+        return {"x":0, "y":0}
+
 @app.get("/mapdata")
 async def mapdata():
     return{"mapdata":RAW_MAP_DATA}
 
 @app.get("/costmapdata")
 async def costmapdata():
-    return{"mapdata":planner.cost_map}
+    # 変更点: NumPy配列をリストに変換してJSONシリアライズ可能にする
+    if planner and hasattr(planner, 'cost_map'):
+        return {"mapdata": planner.cost_map.tolist()}
+    return {"mapdata": []}
 
 @app.get("/target_point")
 async def target_point():
@@ -429,8 +440,8 @@ async def target_point():
 @app.get("/controll_api")
 def control_api(
     direction: int, 
-    speed: float,     
-    angle: float      
+    speed: float,      
+    angle: float       
 ):
     global manual_control, manual_speed, manual_direction, manual_angle
     manual_direction = direction
@@ -529,7 +540,7 @@ def main():
                     elif(manual_direction == 1 or manual_direction == -1):
                         EB = False
                         if(manual_angle > 0): #右曲がり
-                            manual_left = 100,manual_direction * manual_speed * (100 - manual_angle)
+                            manual_left = manual_direction * manual_speed * (100 - manual_angle)
                             manual_right = manual_direction * manual_speed * 100
                         elif(manual_angle <= 0): #左曲がり
                             manual_left = manual_direction * manual_speed * 100
