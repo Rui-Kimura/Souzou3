@@ -50,29 +50,11 @@ PIXEL_TO_MM = 0.0017 * SENSOR_HEIGHT_MM
 PROFILE_FILE = "bno_profile.json"
 
 # ======== 2. マップ定義 ========
-# 入力されたマップデータ
-RAW_MAP_DATA = [
-    "1111111111111111111111111111111111111111",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1000000000000000000000000000000000000001",
-    "1111111111111111111111111111111111111111"
-]
+
+MAP_DATA_PATH = "room.dat"
+RAW_MAP_DATA = []
+with open(MAP_DATA_PATH, "r") as f:
+    RAW_MAP_DATA = [line.rstrip for line in f]
 
 manual_control = False
 manual_speed = 0.0
@@ -237,7 +219,13 @@ def setup_hardware():
     
     p1.start(0); p2.start(0); p3.start(0); p4.start(0)
 
-def set_motor_speed(left_speed, right_speed):
+def set_motor_speed(left_speed, right_speed, brake=False):
+    if(brake == True):
+        """緊急停止用ブレーキ"""
+        p1.ChangeDutyCycle(100); p2.ChangeDutyCycle(100)
+        p3.ChangeDutyCycle(100); p4.ChangeDutyCycle(100)
+        return
+    
     """左右のモーター速度を設定 (-100 ~ 100)"""
     l = max(-100, min(100, left_speed))
     r = max(-100, min(100, right_speed))
@@ -459,7 +447,7 @@ def main():
         
         OP_QUEUE = []
         while True: #主ループ
-            
+            EB = False
 
 
             # 手動コントロール用
@@ -468,6 +456,7 @@ def main():
                     if(manual_speed < 0):
                         manual_left = 0
                         manual_right = 0
+                        EB = True
                     elif(manual_direction == 1 | manual_direction == -1):
                         if(manual_angle > 0): #右曲がり
                             manual_left = manual_direction * manual_speed * (100 - manual_angle)
@@ -479,8 +468,8 @@ def main():
                     manual_right = 0
                     manual_left = 0
 
+                set_motor_speed(manual_left, manual_right,EB)
                 move_linear(manual_liniar)
-                set_motor_speed(manual_left, manual_right)
                 continue
 
 
