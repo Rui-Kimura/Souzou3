@@ -14,7 +14,7 @@ export default function Home() {
         <Box>
           <Typography variant="h6"sx={{p:2}}>メニュー</Typography>
           <Box sx={{ display: "flex",flexWrap: "wrap",gap:2}}>
-            <Button onClick={() => handleClick('/')} variant="contained" color="primary" sx={{ width: "250px" }} >
+            <Button onClick={() => handleClick('/automation')} variant="contained" color="primary" sx={{ width: "250px" }} >
               自動移動
             </Button>
             <Button onClick={() => handleClick('/controller')} variant="contained" color="primary" sx={{ width: "250px" }} >
