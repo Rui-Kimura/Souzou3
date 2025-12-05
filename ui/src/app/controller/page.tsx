@@ -11,7 +11,8 @@ import Switch from '@mui/material/Switch';
 import { PanelContainer, MasconHandle, ReverserHandle, SemicircleMascon, MechanicalSwitch } from './style';
 import { Typography } from '@mui/material';
 
-const API_HOST = "/api/local";
+const API_HOST = "/api/local"
+;
 
 export default function ControllerApp() {
     const [masconValue, setMasconValue] = useState(0);
