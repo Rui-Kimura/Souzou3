@@ -482,8 +482,8 @@ async def position():
     # API呼び出し時もロックを使って安全に読み取る
     with position_lock:
         if robot:
-            return {"x":robot.x,"y":robot.y}
-        return {"x":0, "y":0,"angle":robot.heading}
+            return {"x":robot.x,"y":robot.y,"angle":robot.heading}
+        return {"x":0, "y":0,"angle":0}
 
 @app.get("/mapdata")
 async def mapdata():
