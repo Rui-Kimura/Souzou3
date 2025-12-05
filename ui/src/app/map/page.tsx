@@ -119,7 +119,7 @@ export default function Page() {
                 // 修正: playerPixelX/Yは既に中心座標相当(正確な位置)を指しているため、+10のオフセットを削除
                 left: playerPixelX - iconHalfWidth,
                 top: playerPixelY - (TILE_SIZE / 3 * 1.5),
-                transform: `rotate(${position_angle - 0}deg)`,
+                transform: `rotate(${-position_angle}deg)`,
                 zIndex: 10,
                 transition: "all 0.3s ease-out",
               }}
