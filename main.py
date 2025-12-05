@@ -388,11 +388,11 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
 
 def move_linear(status):
     if(status==1):  #上昇
-        GPIO.output(LINEAR_IN1, GPIO.HIGH)
-        GPIO.output(LINEAR_IN2, GPIO.LOW)
-    elif(status==-1): #下降
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.HIGH)
+    elif(status==-1): #下降
+        GPIO.output(LINEAR_IN1, GPIO.HIGH)
+        GPIO.output(LINEAR_IN2, GPIO.LOW)
     else: #STOP
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
