@@ -483,7 +483,7 @@ async def position():
     with position_lock:
         if robot:
             return {"x":robot.x,"y":robot.y}
-        return {"x":0, "y":0}
+        return {"x":0, "y":0,"angle":robot.heading}
 
 @app.get("/mapdata")
 async def mapdata():
