@@ -16,7 +16,6 @@ import uvicorn
 import threading
 
 
-# ======== 1. 設定と定数 ========
 # --- マップ・グリッド設定 ---
 GRID_SIZE_MM = 50.0      # 1マスの大きさ (mm)
 ROBOT_WIDTH_MM = 400.0   # 筐体幅
@@ -33,7 +32,7 @@ KP_TURN = -1.2  # 回転制御ゲイン
 TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
 DIST_THRESHOLD_MM = 40.0 # 目標点到達許容誤差
 
-# --- ピン設定 (動作確認済みのもの) ---
+# --- ピン設定 ---
 L_EN = 19
 IN1 = 21 # LEFT_F
 IN2 = 20 # LEFT_B
@@ -55,12 +54,11 @@ PROFILE_FILE = "bno_profile.json"
 
 MAP_DATA_PATH = "room.dat"
 RAW_MAP_DATA = []
-# ファイルが存在しない場合のエラー回避用ダミーデータ（必要に応じて修正してください）
 if os.path.exists(MAP_DATA_PATH):
     with open(MAP_DATA_PATH, "r") as f:
         RAW_MAP_DATA = [line.rstrip() for line in f]
 else:
-    # デフォルトのダミーマップ（テスト用）
+    # ダミーマップ（テスト用）
     RAW_MAP_DATA = ["0"*20 for _ in range(20)]
 
 target_grid = (10, 10, 0)
@@ -75,9 +73,9 @@ planner = None
 # 排他制御用ロック (位置情報の更新と読み取りが競合しないようにする)
 position_lock = threading.Lock()
 
-# ======== 3. クラス定義 ========
 
-# --- 追加: ArduinoController ---
+
+# ---  ArduinoController ---
 class ArduinoController:
     def __init__(self, baudrate=9600):
         self.ser = None
@@ -87,46 +85,32 @@ class ArduinoController:
         if self.port_name:
             self._connect()
         else:
-            # サーバーを落とさないために、見つからない場合は警告のみにする
-            print("【警告】Arduinoが見つかりません。シリアル通信機能は無効化されます。")
+            print("Arduinoが見つかりません。")
             self.ser = None
 
     def _find_arduino_port(self):
-        """Arduinoポートを自動検出する内部メソッド"""
         ports = list(serial.tools.list_ports.comports())
         for p in ports:
-            # Arduino Uno または 互換機の特徴で検索
             if "Arduino" in p.description or "Uno" in p.description:
                 return p.device
-            # 必要に応じてVID:PID検索を追加
-            # if "2341:0043" in p.hwid: return p.device
         return None
 
     def _connect(self):
-        """シリアル接続を確立し、初期リセット待機を行う"""
         try:
             print(f"Arduinoを {self.port_name} で検出。接続中...")
             self.ser = serial.Serial(self.port_name, self.baudrate, timeout=1)
-            
-            # 【重要】ここでのみ2秒待つ（初回接続時のリセット対策）
-            print("通信安定化のため2秒待機します...")
             time.sleep(2)
-            print("Arduino接続完了。準備OKです。")
             
         except serial.SerialException as e:
             print(f"Arduino接続エラー: {e}")
             self.ser = None
 
     def send_command(self, command):
-        """
-        待機時間なしで即座にコマンドを送信するメソッド
-        """
         if self.ser and self.ser.is_open:
             try:
-                # 送信データ作成
                 data = command.encode('utf-8')
                 self.ser.write(data)
-                self.ser.flush() # 即時送信を確定させる
+                self.ser.flush() 
                 print(f">> Arduinoへコマンド '{command}' を送信しました")
             except serial.SerialException as e:
                 print(f"送信エラー: {e}")
@@ -134,7 +118,6 @@ class ArduinoController:
             print(f"エラー: Arduinoが接続されていないため '{command}' を送信できません")
 
     def close(self):
-        """終了時にポートを閉じる"""
         if self.ser and self.ser.is_open:
             self.ser.close()
             print("Arduino接続を終了しました。")
@@ -167,12 +150,6 @@ class RobotState:
         rad = math.radians(self.heading)
         
         # 移動ベクトルを回転
-        # global_dx = fwd * sin(theta) + side * cos(theta)
-        # global_dy = -fwd * cos(theta) + side * sin(theta) (Y軸反転注意)
-        
-        # ここではシンプルに: 
-        # Heading 0度(上)のとき: dyが負(減る), dxが変化なし
-        # これを三角関数で表現
         dx_global = dist_fwd * math.sin(rad) + dist_side * math.cos(rad)
         dy_global = -(dist_fwd * math.cos(rad) - dist_side * math.sin(rad))
 
@@ -274,9 +251,8 @@ class PathPlanner:
         path.reverse()
         return path
 
-# ======== 4. ハードウェア制御用関数 ========
 
-# PWMインスタンス (グローバル)
+# PWMインスタンス
 p1, p2, p3, p4 = None, None, None, None
 
 def setup_hardware():
@@ -297,12 +273,10 @@ def setup_hardware():
 
 def set_motor_speed(left_speed, right_speed, brake=False):
     if(brake == True):
-        """緊急停止用ブレーキ"""
         p1.ChangeDutyCycle(100); p2.ChangeDutyCycle(100)
         p3.ChangeDutyCycle(100); p4.ChangeDutyCycle(100)
         return
     
-    """左右のモーター速度を設定 (-100 ~ 100)"""
     l = max(-100, min(100, left_speed))
     r = max(-100, min(100, right_speed))
     
@@ -314,7 +288,6 @@ def set_motor_speed(left_speed, right_speed, brake=False):
     else: p3.ChangeDutyCycle(0); p4.ChangeDutyCycle(abs(r))
 
 def get_bno_heading(sensor):
-    """安定するまで何度かリトライして角度取得"""
     for _ in range(5):
         try:
             h = sensor.euler[0]
@@ -323,15 +296,11 @@ def get_bno_heading(sensor):
         time.sleep(0.005)
     return None
 
-# ======== 5. メイン移動ロジック ========
-
 def monitor_position(robot_instance, bno_sensor, pmw_sensor):
-    """並列スレッドで常に位置情報を更新し続ける"""
     while True:
         # センサー読み取り
         h = get_bno_heading(bno_sensor)
         try:
-            # get_motion()は呼び出すとレジスタがクリアされるため、ここで一度だけ呼ぶ
             dx, dy = pmw_sensor.get_motion()
         except:
             dx, dy = 0, 0
@@ -340,13 +309,10 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
         with position_lock:
             robot_instance.update(h, dx, dy)
         
-        # CPU負荷軽減のため少し待つ
         time.sleep(0.02)
 
 def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     """現在地から目標グリッドまでの経路を計算して移動。target_grid_pos=(x, y, angle)"""
-    
-    # 目標情報 (x, y) と オプションの角度 (angle) を分離
     target_angle = None
     if len(target_grid_pos) == 3:
         target_x, target_y, target_angle = target_grid_pos
@@ -354,12 +320,10 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     else:
         goal_grid = target_grid_pos
 
-    # 1. 現在のグリッド座標を取得
     with position_lock:
         start_grid = robot.get_grid_pos()
     print(f"経路計画開始: {start_grid} -> {goal_grid} (Heading: {target_angle})")
 
-    # 2. A*で経路計算
     path = _planner.get_path_astar(start_grid, goal_grid)
     
     if not path:
@@ -369,7 +333,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     print(f"経路決定: {len(path)} ステップ")
     # path = [(x,y), (x,y), ...] 
     
-    # 3. 経路の各ポイントを順に通過 (最初の点は現在地なのでスキップ)
+    # 経路の各ポイントを順に通過 (最初の点は現在地なのでスキップ)
     for i in range(1, len(path)):
         next_node = path[i]
         # 目標座標 (mm) 中心へ
@@ -379,10 +343,8 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
         print(f"WayPoint {i}/{len(path)-1}: Grid{next_node}を目ざします")
 
         # --- ウェイポイント到達ループ ---
-        while True:
-            # センサー更新は monitor_position スレッドで行っている
-            
-            # ロックをして最新の座標を取得
+        while True:            
+            # 最新の座標を取得
             with position_lock:
                 current_x = robot.x
                 current_y = robot.y
@@ -407,8 +369,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
             # 回転必要量
             heading_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
-            # --- 制御ロジック ---
-            # 1. 角度ズレが大きい場合は、その場で回転
+            # 角度ズレが大きい場合は、その場で回転
             if abs(heading_diff) > 20:
                 turn_pow = KP_TURN * heading_diff
                 # 最低出力確保
@@ -417,7 +378,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
                 
                 set_motor_speed(-turn_pow, turn_pow) # 左回転: 左-, 右+
             
-            # 2. 向きが合っていれば直進 + 角度微調整
+            # 向きが合っていれば直進 + 角度微調整
             else:
                 correction = heading_diff * KP_DIST
                 l_speed = BASE_SPEED - correction
@@ -429,7 +390,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
     print("目標地点座標に到着しました。")
     set_motor_speed(0, 0)
 
-    # 4. 最終角度への回転 (指定がある場合)
+    # 最終角度への回転 
     if target_angle is not None:
         print(f"最終角度調整: {target_angle}度 へ回転します")
         while True:
@@ -462,11 +423,9 @@ def move_linear(status):
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
 
-# localhost api
 app = FastAPI()
 
 robot = None
-# --- 追加: ArduinoControllerのインスタンス化 ---
 arduino = ArduinoController()
 
 @app.middleware("http")
@@ -479,7 +438,6 @@ async def root():
     return {"message":"Hello World"}
 @app.get("/position")
 async def position():
-    # API呼び出し時もロックを使って安全に読み取る
     with position_lock:
         if robot:
             return {"x":robot.x,"y":robot.y,"angle":robot.heading}
@@ -491,7 +449,6 @@ async def mapdata():
 
 @app.get("/costmapdata")
 async def costmapdata():
-    # 変更点: NumPy配列をリストに変換してJSONシリアライズ可能にする
     if planner and hasattr(planner, 'cost_map'):
         return {"mapdata": planner.cost_map.tolist()}
     return {"mapdata": []}
@@ -540,7 +497,6 @@ def linear_move(mode:str):
         "linear": manual_liniar
     }
 
-# --- 追加: Slide API ---
 @app.get("/slide")
 def slide_move(mode:str):
     print(f"Slide Command Received: {mode}")

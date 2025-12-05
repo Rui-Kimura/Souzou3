@@ -69,11 +69,9 @@ export default function Page() {
     return () => clearInterval(intervalId);
   }, []);
 
-  // 修正: Math.roundを削除し、正確なピクセル位置を計算 (滑らかな移動のため)
   const playerPixelX = (position_x / TILE_WIDTH) * TILE_SIZE;
   const playerPixelY = (position_y / TILE_WIDTH) * TILE_SIZE;
   
-  // ターゲットはグリッド座標(整数)なのでそのまま
   const targetPixelX = target_x * TILE_SIZE;
   const targetPixelY = target_y * TILE_SIZE;
 
@@ -116,7 +114,6 @@ export default function Page() {
                 borderLeft: `${iconHalfWidth}px solid transparent`,
                 borderRight: `${iconHalfWidth}px solid transparent`,
                 borderBottom: `${iconHeight}px solid #e74c3c`,
-                // 修正: playerPixelX/Yは既に中心座標相当(正確な位置)を指しているため、+10のオフセットを削除
                 left: playerPixelX - iconHalfWidth,
                 top: playerPixelY - (TILE_SIZE / 3 * 1.5),
                 transform: `rotate(${-position_angle}deg)`,
@@ -133,7 +130,6 @@ export default function Page() {
                 borderLeft: `${iconHalfWidth}px solid transparent`,
                 borderRight: `${iconHalfWidth}px solid transparent`,
                 borderBottom: `${iconHeight}px solid #4400ffff`,
-                // ターゲットはグリッドの左上座標なので、中心に合わせるために +10 する
                 left: targetPixelX + 10 - iconHalfWidth,
                 top: targetPixelY + 10 - (TILE_SIZE / 3 * 1.5),
                 transform: `rotate(${target_angle + 90}deg)`,
