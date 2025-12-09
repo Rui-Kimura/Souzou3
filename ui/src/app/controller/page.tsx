@@ -19,8 +19,12 @@ export default function ControllerApp() {
     const [reverserValue, setReverserValue] = useState(0);
     const [angleValue, setAngleValue] = useState(0);
     const [manualMode, setManualMode] = useState(false);
+    const [rotateMode, setRotateMode] = useState(false);
     const handleChange = (event: any) => {
         setManualMode(event.target.checked);
+    };
+    const rotateModeChange = (event: any) => {
+        setRotateMode(event.target.checked);
     };
     const [scale, setScale] = useState(1);
 
@@ -41,7 +45,7 @@ export default function ControllerApp() {
     useEffect(() => {
         const sendControlData = async () => {
             try {
-                await fetch(API_HOST + `/controll_api?direction=${reverserValue}&speed=${masconValue * -1}&angle=${angleValue}`, {
+                await fetch(API_HOST + `/controll_api?direction=${reverserValue}&speed=${masconValue * -1}&angle=${angleValue}&rotate=${rotateMode}`, {
                     method: 'GET'
                 });
             } catch (error) {
@@ -65,6 +69,7 @@ export default function ControllerApp() {
         setMasconValue(0);
         setReverserValue(0);
         setAngleValue(0);
+        setRotateMode(false);
     }, [manualMode]);
 
     const handleMasconChange = (event: any, newValue: number | number[]) => {
@@ -281,7 +286,6 @@ export default function ControllerApp() {
                             </Fab>
                         </PanelContainer>
                         </Box>
-                        {/* 空白 ボタン等入れる予定 */}
                     </Grid>
 
                     <Grid width="calc(100%/3 + 10%)" display={"flex"} flexDirection={"column"}>
@@ -305,6 +309,19 @@ export default function ControllerApp() {
                                 value={angleValue}
                                 onChange={setAngleValue}
                             />
+                            <Box sx={{ display: "flex", flexDirection: "column" }}>
+                                <Typography sx={{ color: "white", marginBottom: 1, width: "100%", textAlign: "center" }}>超信地旋回</Typography>
+                                <Box display={"flex"}>
+                                    <Typography sx={{ color: "white", m: 0.5 }}>切</Typography>
+                                    <MechanicalSwitch
+                                        checked={rotateMode}
+                                        onChange={rotateModeChange}
+                                        inputProps={{ 'aria-label': 'mechanical switch' }}
+                                        disableRipple
+                                    />
+                                    <Typography sx={{ color: "red", m: 0.5 }}>入</Typography>
+                                </Box>
+                            </Box>
                         </PanelContainer>
                     </Grid>
                 </Box>

@@ -377,7 +377,7 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
           key={v}
           x1={x1} y1={y1}
           x2={x2} y2={y2}
-          stroke="#999"
+          stroke="#ffffffff"
           strokeWidth={strokeWidth}
         />
       );
@@ -392,7 +392,7 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
             x={tx} y={ty}
             textAnchor="middle"
             dominantBaseline="middle"
-            fill="#666"
+            fill="#ffffffff"
             fontSize="14"
             fontWeight="bold"
             style={{ userSelect: 'none' }} 
@@ -473,7 +473,7 @@ export const SemicircleMascon = ({ value, onChange, sx }: { value: number; onCha
           x={CENTER_X}
           y={CENTER_Y + HANDLE_RADIUS + 40}
           textAnchor="middle"
-          fill="#333"
+          fill="#ffffffff"
           fontSize="24"
           fontWeight="bold"
           style={{ userSelect: 'none' }}
