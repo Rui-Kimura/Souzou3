@@ -116,7 +116,7 @@ export default function Page() {
                 borderBottom: `${iconHeight}px solid #e74c3c`,
                 left: playerPixelX - iconHalfWidth,
                 top: playerPixelY - (TILE_SIZE / 3 * 1.5),
-                transform: `rotate(${-position_angle}deg)`,
+                transform: `rotate(${position_angle+90}deg)`,
                 zIndex: 10,
                 transition: "all 0.3s ease-out",
               }}
