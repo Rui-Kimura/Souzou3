@@ -67,6 +67,7 @@ manual_control = False
 manual_speed = 0.0
 manual_direction = 0.0
 manual_angle = 0.0
+manual_rotate = False
 manual_liniar = 0
 
 planner = None
@@ -271,7 +272,7 @@ def setup_hardware():
     
     p1.start(0); p2.start(0); p3.start(0); p4.start(0)
 
-def set_motor_speed(left_speed, right_speed, brake=False):
+def set_motor_speed(left_speed, right_speed, rotate=False, brake=False,):
     if(brake == True):
         p1.ChangeDutyCycle(100); p2.ChangeDutyCycle(100)
         p3.ChangeDutyCycle(100); p4.ChangeDutyCycle(100)
@@ -465,13 +466,15 @@ async def target_point():
 def control_api(
     direction: int, 
     speed: float,      
-    angle: float       
+    angle: float,
+    rotate: bool  
 ):
-    global manual_control, manual_speed, manual_direction, manual_angle
+    global manual_control, manual_speed, manual_direction, manual_angle, manual_rotate
     manual_direction = direction
     manual_speed = speed / 5.0
     manual_angle = angle
-    print(f"受信データ: direction={direction}, speed={manual_speed}, angle={angle}")
+    manual_rotate = rotate
+    print(f"受信データ: direction={direction}, speed={manual_speed}, angle={angle}, rotate={rotate}")
     return {
         "status": "controlled"
     }
