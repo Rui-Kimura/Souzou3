@@ -572,7 +572,7 @@ def main():
             EB = False
             # 手動コントロール用
             while(manual_control):
-                if(manual_direction != 0):
+                if(manual_direction != 0 and not manual_rotate):
                     if(manual_speed < 0):
                         manual_left = 0
                         manual_right = 0
@@ -586,13 +586,16 @@ def main():
                             manual_left = manual_direction * manual_speed * 100
                             manual_right = manual_direction * manual_speed * (100 + manual_angle)
                         #END IF
-                    #END IF
+                elif(manual_direction != 0 and manual_rotate): #超信地旋回
+                    EB = False
+                    manual_right = manual_direction * manual_speed * manual_angle
+                    manual_left = -1 * manual_right
                 else:
                     manual_right = 0
                     manual_left = 0
                 #END IF
 
-                set_motor_speed(manual_left, manual_right,EB)
+                set_motor_speed(manual_left, manual_right,False,EB)
                 move_linear(manual_liniar)
                 continue
             #END WHILE(manual_control)
