@@ -1,16 +1,11 @@
 "use client"
 import React, { useState, useEffect, useRef } from 'react';
-import Slider from '@mui/material/Slider';
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
 import Fab from '@mui/material/Fab';
-import FormGroup from '@mui/material/FormGroup';
-import FormControlLabel from '@mui/material/FormControlLabel';
-import FormControl from '@mui/material/FormControl';
-import Switch from '@mui/material/Switch';
 import { PanelContainer, MasconHandle, ReverserHandle, SemicircleMascon, MechanicalSwitch } from './style';
-import { Typography } from '@mui/material';
-
+import { Typography,IconButton, Tooltip } from '@mui/material';
+import FullscreenButton from '@/components/FullScreenButton';
 const API_HOST = "/api/local"
 ;
 
@@ -19,7 +14,7 @@ export default function ControllerApp() {
     const [reverserValue, setReverserValue] = useState(0);
     const [angleValue, setAngleValue] = useState(0);
     const [manualMode, setManualMode] = useState(false);
-    const [rotateMode, setRotateMode] = useState(false);
+    const [rotateValue, setRotateMode] = useState(false);
     const handleChange = (event: any) => {
         setManualMode(event.target.checked);
     };
@@ -45,7 +40,7 @@ export default function ControllerApp() {
     useEffect(() => {
         const sendControlData = async () => {
             try {
-                await fetch(API_HOST + `/controll_api?direction=${reverserValue}&speed=${masconValue * -1}&angle=${angleValue}&rotate=${rotateMode}`, {
+                await fetch(API_HOST + `/controll_api?direction=${reverserValue}&speed=${masconValue * -1}&angle=${angleValue}&rotate=${rotateValue}`, {
                     method: 'GET'
                 });
             } catch (error) {
@@ -53,7 +48,7 @@ export default function ControllerApp() {
             }
         };
         sendControlData();
-    }, [masconValue, reverserValue, angleValue]);
+    }, [masconValue, reverserValue, angleValue,rotateValue]);
 
     useEffect(() => {
         const set_manual_mode = async (mode: boolean) => {
@@ -79,9 +74,6 @@ export default function ControllerApp() {
     const handleReverserChange = (event: any, newValue: number | number[]) => {
         setReverserValue(Array.isArray(newValue) ? newValue[0] : newValue);
     };
-
-    const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
-
     const upLinear = async () => {
         try {
             await fetch(API_HOST + `/linear?mode=up`, {
@@ -304,7 +296,7 @@ export default function ControllerApp() {
                                 </Box>
                             </Box>
                         </PanelContainer>
-                        <PanelContainer sx={{ p: 2 }}>
+                        <PanelContainer sx={{ pt:0,pb:2,pl:2,pr:2 }}>
                             <SemicircleMascon
                                 value={angleValue}
                                 onChange={setAngleValue}
@@ -314,7 +306,7 @@ export default function ControllerApp() {
                                 <Box display={"flex"}>
                                     <Typography sx={{ color: "white", m: 0.5 }}>切</Typography>
                                     <MechanicalSwitch
-                                        checked={rotateMode}
+                                        checked={rotateValue}
                                         onChange={rotateModeChange}
                                         inputProps={{ 'aria-label': 'mechanical switch' }}
                                         disableRipple
@@ -326,6 +318,7 @@ export default function ControllerApp() {
                     </Grid>
                 </Box>
             </Box>
+            <FullscreenButton/>
         </Box>
     );
 }
