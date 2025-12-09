@@ -4,10 +4,10 @@ import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
 import Fab from '@mui/material/Fab';
 import { PanelContainer, MasconHandle, ReverserHandle, SemicircleMascon, MechanicalSwitch } from './style';
-import { Typography,IconButton, Tooltip } from '@mui/material';
+import { Typography, IconButton, Tooltip } from '@mui/material';
 import FullscreenButton from '@/components/FullScreenButton';
 const API_HOST = "/api/local"
-;
+    ;
 
 export default function ControllerApp() {
     const [masconValue, setMasconValue] = useState(0);
@@ -47,8 +47,9 @@ export default function ControllerApp() {
                 console.error('Failed to send control data:', error);
             }
         };
-        sendControlData();
-    }, [masconValue, reverserValue, angleValue,rotateValue]);
+        if (manualMode)
+            sendControlData();
+    }, [masconValue, reverserValue, angleValue, rotateValue]);
 
     useEffect(() => {
         const set_manual_mode = async (mode: boolean) => {
@@ -75,73 +76,65 @@ export default function ControllerApp() {
         setReverserValue(Array.isArray(newValue) ? newValue[0] : newValue);
     };
     const upLinear = async () => {
-        try {
-            await fetch(API_HOST + `/linear?mode=up`, {
-                method: 'GET'
-            });
-        } catch (error) {
-            console.error('Failed to set manual mode:', error);
+        if (manualMode) {
+            try {
+                await fetch(API_HOST + `/linear?mode=up`, {
+                    method: 'GET'
+                });
+            } catch (error) {
+                console.error('Failed to set manual mode:', error);
+            }
         }
     };
 
     const downLinear = async () => {
-        try {
-            await fetch(API_HOST + `/linear?mode=down`, {
-                method: 'GET'
-            });
-        } catch (error) {
-            console.error('Failed to set manual mode:', error);
+        if (manualMode) {
+            try {
+                await fetch(API_HOST + `/linear?mode=down`, {
+                    method: 'GET'
+                });
+            } catch (error) {
+                console.error('Failed to set manual mode:', error);
+            }
         }
     };
 
     const stopLinear = async () => {
-        try {
-            await fetch(API_HOST + `/linear?mode=stop`, {
-                method: 'GET'
-            });
-        } catch (error) {
-            console.error('Failed to set manual mode:', error);
+        if (manualMode) {
+            try {
+                await fetch(API_HOST + `/linear?mode=stop`, {
+                    method: 'GET'
+                });
+            } catch (error) {
+                console.error('Failed to set manual mode:', error);
+            }
         }
     };
 
     const openSlide = async () => {
-        try {
-            await fetch(API_HOST + `/slide?mode=open`, {
-                method: 'GET'
-            });
-        } catch (error) {
-            console.error('Failed to set manual mode:', error);
+        if (manualMode) {
+            try {
+                await fetch(API_HOST + `/slide?mode=open`, {
+                    method: 'GET'
+                });
+            } catch (error) {
+                console.error('Failed to set manual mode:', error);
+            }
         }
     }
 
     const closeSlide = async () => {
-        try {
-            await fetch(API_HOST + `/slide?mode=close`, {       
-                method: 'GET'
-            });
-        }
-        catch (error) {
-            console.error('Failed to set manual mode:', error);
+        if (manualMode) {
+            try {
+                await fetch(API_HOST + `/slide?mode=close`, {
+                    method: 'GET'
+                });
+            }
+            catch (error) {
+                console.error('Failed to set manual mode:', error);
+            }
         }
     }
-
-    const up_startPress = () => {
-        upLinear();
-    };
-
-    const up_stopPress = () => {
-        stopLinear();
-    };
-
-    const down_startPress = () => {
-        downLinear();
-    };
-
-    const down_stopPress = () => {
-        stopLinear();
-    };
-
-
 
     /*操作画面を閉じるときは停止し制御を切る*/
     const handleBeforeUnload = async () => {
@@ -189,7 +182,7 @@ export default function ControllerApp() {
                         userSelect: 'none',
                     }}
                 >
-                    <Grid width="calc(100%/3*2 - 10%)" display={"flex"} height={"100%"} sx={{textAlign: "left"}} >
+                    <Grid width="calc(100%/3*2 - 10%)" display={"flex"} height={"100%"} sx={{ textAlign: "left" }} >
                         <PanelContainer sx={{ mr: 2, marginLeft: 5 }}>
                             <ReverserHandle
                                 value={reverserValue}
@@ -204,79 +197,79 @@ export default function ControllerApp() {
                                 sx={{ marginTop: 2 }}
                             />
                         </PanelContainer>
-                        <Box sx={{display:"flex", flexDirection:"column"}}>
-                        <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "25%" }}>
-                            <Fab
-                                aria-label="add"
-                                sx={{
-                                    backgroundColor: 'white',
-                                    color: 'Black',
-                                    '&:hover': {
-                                        backgroundColor: '#f5f5f5',
-                                    },
-                                    marginBottom: 1,
-                                    fontSize: '1.2rem'
-                                }}
-                                onMouseDown={up_startPress}  
-                                onMouseUp={up_stopPress}     
-                                onMouseLeave={up_stopPress}  
-                                onTouchStart={up_startPress} 
-                                onTouchEnd={up_stopPress}   
-                            >
-                                上
-                            </Fab>
-                            <Fab
-                                aria-label="add"
-                                sx={{
-                                    backgroundColor: '#B40000',
-                                    color: 'White',
-                                    '&:hover': {
+                        <Box sx={{ display: "flex", flexDirection: "column" }}>
+                            <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "25%" }}>
+                                <Fab
+                                    aria-label="add"
+                                    sx={{
+                                        backgroundColor: 'white',
+                                        color: 'Black',
+                                        '&:hover': {
+                                            backgroundColor: '#f5f5f5',
+                                        },
+                                        marginBottom: 1,
+                                        fontSize: '1.2rem'
+                                    }}
+                                    onMouseDown={upLinear}
+                                    onMouseUp={stopLinear}
+                                    onMouseLeave={stopLinear}
+                                    onTouchStart={upLinear}
+                                    onTouchEnd={stopLinear}
+                                >
+                                    上
+                                </Fab>
+                                <Fab
+                                    aria-label="add"
+                                    sx={{
                                         backgroundColor: '#B40000',
-                                    },
-                                    marginTop: 1,
-                                    fontSize: '1.2rem'
-                                }}
-                                onMouseDown={down_startPress}  
-                                onMouseUp={down_stopPress}     
-                                onMouseLeave={down_stopPress}  
-                                onTouchStart={down_startPress} 
-                                onTouchEnd={down_stopPress}   
-                            >
-                                下
-                            </Fab>
-                        </PanelContainer>
-                        <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "25%" }}>
-                            <Fab
-                                aria-label="add"
-                                sx={{
-                                    backgroundColor: 'white',
-                                    color: 'Black',
-                                    '&:hover': {
-                                        backgroundColor: '#f5f5f5',
-                                    },
-                                    marginBottom: 1,
-                                    fontSize: '1.2rem'
-                                }}
-                                onClick={openSlide}  
-                            >
-                                展
-                            </Fab>
-                            <Fab
-                                aria-label="add"
-                                sx={{
-                                    backgroundColor: '#ffffffff',
-                                    color: 'Black',
-                                    '&:hover': {
-                                        backgroundColor: '#B40000',
-                                    },
-                                    marginTop: 1,
-                                    fontSize: '1.2rem'
-                                }}
-                                onClick={closeSlide}  
-                            >
-                                収
-                            </Fab>
-                        </PanelContainer>
+                                        color: 'White',
+                                        '&:hover': {
+                                            backgroundColor: '#B40000',
+                                        },
+                                        marginTop: 1,
+                                        fontSize: '1.2rem'
+                                    }}
+                                    onMouseDown={downLinear}
+                                    onMouseUp={stopLinear}
+                                    onMouseLeave={stopLinear}
+                                    onTouchStart={downLinear}
+                                    onTouchEnd={stopLinear}
+                                >
+                                    下
+                                </Fab>
+                            </PanelContainer>
+                            <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "25%" }}>
+                                <Fab
+                                    aria-label="add"
+                                    sx={{
+                                        backgroundColor: 'white',
+                                        color: 'Black',
+                                        '&:hover': {
+                                            backgroundColor: '#f5f5f5',
+                                        },
+                                        marginBottom: 1,
+                                        fontSize: '1.2rem'
+                                    }}
+                                    onClick={openSlide}
+                                >
+                                    展
+                                </Fab>
+                                <Fab
+                                    aria-label="add"
+                                    sx={{
+                                        backgroundColor: '#ffffffff',
+                                        color: 'Black',
+                                        '&:hover': {
+                                            backgroundColor: '#B40000',
+                                        },
+                                        marginTop: 1,
+                                        fontSize: '1.2rem'
+                                    }}
+                                    onClick={closeSlide}
+                                >
+                                    収
+                                </Fab>
+                            </PanelContainer>
                         </Box>
                     </Grid>
 
@@ -296,7 +289,7 @@ export default function ControllerApp() {
                                 </Box>
                             </Box>
                         </PanelContainer>
-                        <PanelContainer sx={{ pt:0,pb:2,pl:2,pr:2 }}>
+                        <PanelContainer sx={{ pt: 0, pb: 2, pl: 2, pr: 2 }}>
                             <SemicircleMascon
                                 value={angleValue}
                                 onChange={setAngleValue}
@@ -318,7 +311,7 @@ export default function ControllerApp() {
                     </Grid>
                 </Box>
             </Box>
-            <FullscreenButton/>
+            <FullscreenButton />
         </Box>
     );
 }
