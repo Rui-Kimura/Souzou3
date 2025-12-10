@@ -616,9 +616,9 @@ def main():
             #END WHILE(manual_control)
             time.sleep(0.05)
             buf_queue = move_queue.get()
-            if(buf_queue.qsize() > 0):
+            if(move_queue.qsize() > 0):
                 print("queue now")
-                print(buf_queue.qsize())
+                print(move_queue.qsize())
                 match buf_queue:
                     case  int(x) if buf_queue == AUTOMOVE:
                         # 修正: グローバル変数の名前変更に対応
