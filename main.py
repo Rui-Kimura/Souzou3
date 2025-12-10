@@ -295,14 +295,14 @@ def get_bno_heading(sensor):
 
 def monitor_position(robot_instance, bno_sensor, pmw_sensor):
     while True:
-        h = get_bno_heading(bno_sensor) + 180
+        h = get_bno_heading(bno_sensor)
         try:
             dx, dy = pmw_sensor.get_motion()
         except:
             dx, dy = 0, 0
         
         with position_lock:
-            robot_instance.update(h, dx, dy)
+            robot_instance.update(h, -dx, dy)
         
         time.sleep(0.02)
 
