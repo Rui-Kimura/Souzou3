@@ -151,8 +151,8 @@ class RobotState:
         dx_global = dist_fwd * math.sin(rad) + dist_side * math.cos(rad)
         dy_global = -(dist_fwd * math.cos(rad) - dist_side * math.sin(rad))
 
-        self.x -= dx_global
-        self.y += dy_global
+        self.x += dx_global
+        self.y -= dy_global
 
     def get_grid_pos(self):
         """マップ操作用: 現在の物理座標をグリッド座標に変換して返す"""
