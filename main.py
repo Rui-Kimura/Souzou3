@@ -302,7 +302,7 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
             dx, dy = 0, 0
         
         with position_lock:
-            robot_instance.update(h, dx, dy)
+            robot_instance.update(h, -dx, dy)
         
         time.sleep(0.02)
 
