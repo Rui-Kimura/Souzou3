@@ -111,7 +111,7 @@ export default function Map() {
                 borderBottom: `${iconHeight}px solid #e74c3c`,
                 left: playerPixelX - iconHalfWidth,
                 top: playerPixelY - (TILE_SIZE / 3 * 1.5),
-                transform: `rotate(${position_angle+90}deg)`,
+                transform: `rotate(${position_angle}deg)`,
                 zIndex: 10,
                 transition: "all 0.3s ease-out",
               }}
@@ -127,7 +127,7 @@ export default function Map() {
                 borderBottom: `${iconHeight}px solid #4400ffff`,
                 left: targetPixelX + 10 - iconHalfWidth,
                 top: targetPixelY + 10 - (TILE_SIZE / 3 * 1.5),
-                transform: `rotate(${target_angle + 90}deg)`,
+                transform: `rotate(${target_angle}deg)`,
                 zIndex: 10,
               }}
             />
