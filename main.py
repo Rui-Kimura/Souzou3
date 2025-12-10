@@ -364,7 +364,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
             # 角度差分 (-180 ~ +180)
             diff = (target_deg - ch + 180) % 360 - 180
             if abs(diff) > 170:
-                print(f"U-Turn Mode: Diff={heading_diff:.1f}")
+                print(f"U-Turn Mode: Diff={diff:.1f}")
                 set_motor_speed(70, -70) 
                 time.sleep(0.05)
                 continue # 以下のPID制御をスキップしてループ先頭へ
