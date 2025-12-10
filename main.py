@@ -364,8 +364,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
                 set_motor_speed(0, 0)
                 break
 
-            # ★修正: 角度計算 (Y軸反転を削除し、引数順序を atan2(x, y) に)
-            target_angle_rad = math.atan2(dx_global, dy_global)
+            target_angle_rad = math.atan2(-dx_global, dy_global)
             target_angle_deg = math.degrees(target_angle_rad)
             if target_angle_deg < 0: target_angle_deg += 360
 
