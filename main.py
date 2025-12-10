@@ -369,6 +369,8 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
 
             heading_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
+            print(f"Cur: {current_heading:.1f} | Tgt: {target_angle_deg:.1f} | Diff: {heading_diff:.1f} | Dist: {distance:.1f}")
+
             if abs(heading_diff) > 20:
                 turn_pow = KP_TURN * heading_diff
                 if turn_pow > 0: turn_pow = max(turn_pow, 25)
