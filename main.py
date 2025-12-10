@@ -8,20 +8,19 @@ import math
 import os
 import json
 from pmw3901 import PMW3901
-import serial                   # 追加
-import serial.tools.list_ports  # 追加
+import serial
+import serial.tools.list_ports
 
 from fastapi import FastAPI, Request
 import uvicorn
 import threading
-
+import queue
 
 # --- マップ・グリッド設定 ---
 GRID_SIZE_MM = 50.0      # 1マスの大きさ (mm)
 ROBOT_WIDTH_MM = 400.0   # 筐体幅
 ROBOT_DEPTH_MM = 350.0   # 筐体奥行
 # 障害物膨張半径 (ロボットの半径 / グリッドサイズ) 
-# 半径 約270mm / 50mm = 5.4 -> 切り上げ+余裕で 6マス
 INFLATION_RADIUS = 6      
 
 # --- モーター制御設定 ---
@@ -61,7 +60,9 @@ else:
     # ダミーマップ（テスト用）
     RAW_MAP_DATA = ["0"*20 for _ in range(20)]
 
-target_grid = (10, 10, 0)
+# 変更: Grid座標ではなく物理座標(mm)の初期値に変更 (例: x=1000mm, y=1000mm)
+target_pose = (1000.0, 1000.0, 0.0)
+
 
 manual_control = False
 manual_speed = 0.0
@@ -69,6 +70,10 @@ manual_direction = 0.0
 manual_angle = 0.0
 manual_rotate = False
 manual_liniar = 0
+
+move_queue = queue.Queue()
+#----- 動作キュー -----
+AUTOMOVE = 1
 
 planner = None
 # 排他制御用ロック (位置情報の更新と読み取りが競合しないようにする)
@@ -125,32 +130,25 @@ class ArduinoController:
 
 
 class RobotState:
-    def __init__(self, start_grid_x, start_grid_y, start_heading):
-        # 現在位置 (mm単位, グローバル座標)
-        self.x = start_grid_x * GRID_SIZE_MM
-        self.y = start_grid_y * GRID_SIZE_MM
-        # 現在の向き (度, 0=北/上, 時計回り正)
+    def __init__(self, start_x, start_y, start_heading):
+        """
+        初期化: 物理座標 (mm) で受け取る
+        """
+        self.x = float(start_x)
+        self.y = float(start_y)
         self.heading = start_heading
-        # グローバル座標系でのオフセット (起動時のセンサ値を0とするため)
         self.heading_offset = 0.0
 
     def update(self, bno_heading, pmw_dx, pmw_dy):
         """センサー値をもとに自己位置を更新"""
         if bno_heading is not None:
-            # BNO055の生の値を、起動時を基準とした角度に変換
-            # (必要に応じてマップの方位と合わせる処理をここに入れる)
             self.heading = bno_heading
 
-        # PMW3901の移動量をmmに変換
-        dist_fwd = pmw_dy * PIXEL_TO_MM # センサY軸 = ロボット前後
-        dist_side = pmw_dx * PIXEL_TO_MM # センサX軸 = ロボット左右
+        dist_fwd = pmw_dy * PIXEL_TO_MM
+        dist_side = pmw_dx * PIXEL_TO_MM
 
-        # ロボット座標系 -> グローバル座標系への回転変換
-        # マップ座標系: X=右+, Y=下+ (画像座標)
-        # 角度: 0=上(-Y), 90=右(+X), 180=下(+Y), 270=左(-X) と仮定
         rad = math.radians(self.heading)
         
-        # 移動ベクトルを回転
         dx_global = dist_fwd * math.sin(rad) + dist_side * math.cos(rad)
         dy_global = -(dist_fwd * math.cos(rad) - dist_side * math.sin(rad))
 
@@ -158,7 +156,9 @@ class RobotState:
         self.y += dy_global
 
     def get_grid_pos(self):
+        """マップ操作用: 現在の物理座標をグリッド座標に変換して返す"""
         return int(self.x / GRID_SIZE_MM), int(self.y / GRID_SIZE_MM)
+
 
 class PathPlanner:
     def __init__(self, raw_map, inflation_r):
@@ -169,11 +169,9 @@ class PathPlanner:
         self.cost_map = self._create_cost_map()
 
     def _parse_map(self, raw_data):
-        # 行の長さを揃えて2次元配列(0/1)にする
         max_len = max(len(row) for row in raw_data)
         grid = []
         for row_str in raw_data:
-            # 足りない部分は '1' (壁) で埋める
             padded = row_str + '1' * (max_len - len(row_str))
             grid.append([int(c) for c in padded])
         return np.array(grid)
@@ -182,7 +180,6 @@ class PathPlanner:
         cost_map = self.grid.copy()
         rows, cols = cost_map.shape
         
-        # 障害物('1')を探し、その周囲を埋める
         obstacles = np.argwhere(self.grid == 1)
         
         for r, c in obstacles:
@@ -196,9 +193,15 @@ class PathPlanner:
         return cost_map
 
     def get_path_astar(self, start_grid, goal_grid):
-        # A*アルゴリズムで経路探索
         start = tuple(start_grid)
         goal = tuple(goal_grid)
+
+        if not (0 <= start[0] < self.width and 0 <= start[1] < self.height):
+             print(f"エラー: スタート地点 {start} がマップ範囲外です")
+             return None
+        if not (0 <= goal[0] < self.width and 0 <= goal[1] < self.height):
+             print(f"エラー: ゴール地点 {goal} がマップ範囲外です")
+             return None
 
         if self.cost_map[start[1]][start[0]] == 1:
             print("警告: スタート地点が障害物(またはその付近)内です")
@@ -206,7 +209,6 @@ class PathPlanner:
             print("エラー: ゴール地点が障害物内または到達不能エリアです")
             return None
 
-        # (F値, (x, y))
         open_set = []
         heapq.heappush(open_set, (0, start))
         
@@ -219,30 +221,25 @@ class PathPlanner:
             if current == goal:
                 return self._reconstruct_path(came_from, current)
 
-            # 上下左右4方向 (斜め移動なしの場合)
             neighbors = [(0, 1), (0, -1), (1, 0), (-1, 0)]
             
             for dx, dy in neighbors:
                 neighbor = (current[0] + dx, current[1] + dy)
                 
-                # 範囲外チェック
                 if not (0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height):
                     continue
-                # 障害物チェック
                 if self.cost_map[neighbor[1]][neighbor[0]] == 1:
                     continue
 
-                # コスト計算 (距離1)
                 tentative_g = g_score[current] + 1
                 
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g
-                    # ヒューリスティック: マンハッタン距離
                     f_score = tentative_g + abs(neighbor[0] - goal[0]) + abs(neighbor[1] - goal[1])
                     heapq.heappush(open_set, (f_score, neighbor))
                     
-        return None # 経路なし
+        return None
 
     def _reconstruct_path(self, came_from, current):
         path = [current]
@@ -299,31 +296,34 @@ def get_bno_heading(sensor):
 
 def monitor_position(robot_instance, bno_sensor, pmw_sensor):
     while True:
-        # センサー読み取り
         h = get_bno_heading(bno_sensor)
         try:
             dx, dy = pmw_sensor.get_motion()
         except:
             dx, dy = 0, 0
         
-        # ロックを取得して更新
         with position_lock:
             robot_instance.update(h, dx, dy)
         
         time.sleep(0.02)
 
-def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
-    """現在地から目標グリッドまでの経路を計算して移動。target_grid_pos=(x, y, angle)"""
-    target_angle = None
-    if len(target_grid_pos) == 3:
-        target_x, target_y, target_angle = target_grid_pos
-        goal_grid = (target_x, target_y)
-    else:
-        goal_grid = target_grid_pos
+# ======== 変更箇所: target_pos_mm (物理座標) を受け取るように変更 ========
+def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
+    """
+    現在地から目標物理座標までの経路を計算して移動。
+    target_pos_mm = (x_mm, y_mm, angle)
+    """
+    # 物理座標(mm) を Grid座標(index) に変換して A* に渡す
+    target_x_mm, target_y_mm, target_angle = target_pos_mm
+    
+    goal_grid_x = int(target_x_mm / GRID_SIZE_MM)
+    goal_grid_y = int(target_y_mm / GRID_SIZE_MM)
+    goal_grid = (goal_grid_x, goal_grid_y)
 
     with position_lock:
         start_grid = robot.get_grid_pos()
-    print(f"経路計画開始: {start_grid} -> {goal_grid} (Heading: {target_angle})")
+    
+    print(f"経路計画開始: Start Grid{start_grid} -> Goal Grid{goal_grid} (Target mm: {target_x_mm:.1f}, {target_y_mm:.1f})")
 
     path = _planner.get_path_astar(start_grid, goal_grid)
     
@@ -332,54 +332,49 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_grid_pos):
         return False
     
     print(f"経路決定: {len(path)} ステップ")
-    # path = [(x,y), (x,y), ...] 
     
-    # 経路の各ポイントを順に通過 (最初の点は現在地なのでスキップ)
+    # 経路の各ポイントを順に通過
     for i in range(1, len(path)):
         next_node = path[i]
-        # 目標座標 (mm) 中心へ
-        target_x_mm = next_node[0] * GRID_SIZE_MM + GRID_SIZE_MM/2
-        target_y_mm = next_node[1] * GRID_SIZE_MM + GRID_SIZE_MM/2
         
-        print(f"WayPoint {i}/{len(path)-1}: Grid{next_node}を目ざします")
+        # 基本的にはグリッドの中心を目指す
+        next_target_x_mm = next_node[0] * GRID_SIZE_MM + GRID_SIZE_MM/2
+        next_target_y_mm = next_node[1] * GRID_SIZE_MM + GRID_SIZE_MM/2
+        
+        # ★最終ステップのみ、ユーザー指定の正確な座標を目指すように上書き
+        if i == len(path) - 1:
+            next_target_x_mm = target_x_mm
+            next_target_y_mm = target_y_mm
+        
+        print(f"WayPoint {i}/{len(path)-1}: {next_node} (mm: {next_target_x_mm:.1f}, {next_target_y_mm:.1f}) を目指します")
 
         # --- ウェイポイント到達ループ ---
         while True:            
-            # 最新の座標を取得
             with position_lock:
                 current_x = robot.x
                 current_y = robot.y
                 current_heading = robot.heading
 
-            # 目標までの距離と角度を計算
-            dx_global = target_x_mm - current_x
-            dy_global = target_y_mm - current_y
+            dx_global = next_target_x_mm - current_x
+            dy_global = next_target_y_mm - current_y
             distance = math.sqrt(dx_global**2 + dy_global**2)
             
-            # 到達判定
             if distance < DIST_THRESHOLD_MM:
                 print("WayPoint 到達")
                 set_motor_speed(0, 0)
                 break
 
-            # 目標方位 (atan2は math.atan2(y, x))
             target_angle_rad = math.atan2(dx_global, -dy_global) 
             target_angle_deg = math.degrees(target_angle_rad)
             if target_angle_deg < 0: target_angle_deg += 360
 
-            # 回転必要量
             heading_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
-            # 角度ズレが大きい場合は、その場で回転
             if abs(heading_diff) > 20:
                 turn_pow = KP_TURN * heading_diff
-                # 最低出力確保
                 if turn_pow > 0: turn_pow = max(turn_pow, 25)
                 else: turn_pow = min(turn_pow, -25)
-                
-                set_motor_speed(-turn_pow, turn_pow) # 左回転: 左-, 右+
-            
-            # 向きが合っていれば直進 + 角度微調整
+                set_motor_speed(-turn_pow, turn_pow) 
             else:
                 correction = heading_diff * KP_DIST
                 l_speed = BASE_SPEED - correction
@@ -457,9 +452,31 @@ async def costmapdata():
 @app.get("/target_point")
 async def target_point():
     return{
-        "x" : target_grid[0],
-        "y" : target_grid[1],
-        "angle" : target_grid[2]
+        "x" : target_pose[0],
+        "y" : target_pose[1],
+        "angle" : target_pose[2]
+    }
+
+@app.get("/set_target_point")
+async def set_target_point(
+    x: float,
+    y:float,
+    angle:float,
+):
+    global target_pose
+    # ユーザーからは物理座標 (mm) が送られてくると想定してそのまま格納
+    target_pose = (x, y, angle)
+    return{
+        "x":x,
+        "y":y,
+        "angle":angle
+    }
+
+@app.get("/automove_start")
+async def automove_start():
+    move_queue.put(AUTOMOVE)
+    return{
+        "auto":"started"
     }
 
 @app.get("/controll_api")
@@ -543,8 +560,13 @@ def main():
         start_x_grid = 7
         start_y_grid = 7
         
+        # Grid座標から物理座標(mm)へ変換して渡す
+        start_x_mm = start_x_grid * GRID_SIZE_MM
+        start_y_mm = start_y_grid * GRID_SIZE_MM
+        
         global robot
-        robot = RobotState(start_x_grid, start_y_grid, start_heading)
+        robot = RobotState(start_x_mm, start_y_mm, start_heading)
+
         global planner
         planner = PathPlanner(RAW_MAP_DATA, inflation_r=INFLATION_RADIUS)
         
@@ -558,14 +580,6 @@ def main():
         
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
-        
-        # target_gridは (x, y) または (x, y, angle) で指定
-        # global target_grid = (10, 10, 180) 
-
-        #print(f"現在地: ({robot.x:.1f}, {robot.y:.1f}) Heading:{robot.heading:.1f}")
-        
-        # 移動開始
-        # move_to_target(planner, robot, bno, pmw, target_grid)
         
         OP_QUEUE = []
         while True: #主ループ
@@ -597,10 +611,19 @@ def main():
 
                 set_motor_speed(manual_left, manual_right,False,EB)
                 move_linear(manual_liniar)
+                time.sleep(0.05)
                 continue
             #END WHILE(manual_control)
             time.sleep(0.05)
-            continue
+            buf_queue = move_queue.get()
+            if(buf_queue.qsize() > 0):
+                match buf_queue:
+                    case  int(x) if buf_queue == AUTOMOVE:
+                        # 修正: グローバル変数の名前変更に対応
+                        move_to_target(planner, robot, bno, pmw, target_pose)
+                    #END CASE AUTOMOVE
+
+            #END IF buf_queue
         #END WHILE(True)
     #END TRY
 
@@ -610,7 +633,7 @@ def main():
     finally:
         set_motor_speed(0, 0)
         GPIO.cleanup()
-        arduino.close() # 追加: Arduinoの接続を切断
+        arduino.close()
 
 if __name__ == "__main__":
     main()
