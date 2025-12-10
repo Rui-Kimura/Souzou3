@@ -72,8 +72,8 @@ export default function Map() {
   const playerPixelX = (position_x / TILE_WIDTH) * TILE_SIZE;
   const playerPixelY = (position_y / TILE_WIDTH) * TILE_SIZE;
   
-  const targetPixelX = target_x * TILE_SIZE;
-  const targetPixelY = target_y * TILE_SIZE;
+  const targetPixelX = target_x / TILE_WIDTH * TILE_SIZE;
+  const targetPixelY = target_y / TILE_WIDTH * TILE_SIZE;
 
   const iconHalfWidth = TILE_SIZE*4.5;
   const iconHeight = TILE_SIZE * 0.8 * 4.5;
