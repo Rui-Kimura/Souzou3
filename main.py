@@ -24,7 +24,7 @@ ROBOT_DEPTH_MM = 350.0   # 筐体奥行
 INFLATION_RADIUS = 6      
 
 # --- モーター制御設定 ---
-BASE_SPEED = 80.0
+BASE_SPEED = 90.0
 KP_DIST = 1.5  # 直進補正ゲイン
 KP_TURN = 1.2  # 回転制御ゲイン
 TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
@@ -302,7 +302,7 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
             dx, dy = 0, 0
         
         with position_lock:
-            robot_instance.update(h, -dx, -dy)
+            robot_instance.update(h, dx, dy)
         
         time.sleep(0.02)
 
@@ -385,7 +385,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
                     # 回転継続
                     turn_pow = KP_TURN * diff
                     # 最小パワーの確保（モーターが唸るだけで動かないのを防ぐ）
-                    min_p = 35 # 少し強めに
+                    min_p = 80 # 少し強めに
                     if turn_pow > 0: turn_pow = max(turn_pow, min_p)
                     else: turn_pow = min(turn_pow, -min_p)
                     set_motor_speed(-turn_pow, turn_pow)
