@@ -347,6 +347,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
         
         print(f"WayPoint {i}/{len(path)-1}: {next_node} (mm: {next_target_x_mm:.1f}, {next_target_y_mm:.1f}) を目指します")
 
+        state_rotating = True
         # --- ウェイポイント到達ループ ---
         while True:            
             with position_lock:
@@ -363,20 +364,32 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
                 set_motor_speed(0, 0)
                 break
 
-            target_angle_rad = math.atan2(dx_global, -dy_global) 
+            # ★修正: 角度計算 (Y軸反転を削除し、引数順序を atan2(x, y) に)
+            target_angle_rad = math.atan2(dx_global, dy_global)
             target_angle_deg = math.degrees(target_angle_rad)
             if target_angle_deg < 0: target_angle_deg += 360
 
             heading_diff = (target_angle_deg - current_heading + 180) % 360 - 180
 
-            print(f"Cur: {current_heading:.1f} | Tgt: {target_angle_deg:.1f} | Diff: {heading_diff:.1f} | Dist: {distance:.1f}")
-
-            if abs(heading_diff) > 20:
+            # --- ヒステリシス制御 ---
+            # 角度ズレが大きい(>20)なら回転モードへ
+            # 角度ズレが小さい(<5)なら直進モードへ
+            # その中間(5~20)は「今の状態を維持」する
+            if abs(heading_diff) > 20.0:
+                state_rotating = True
+            elif abs(heading_diff) < 5.0:
+                state_rotating = False
+            
+            # --- モーター出力 ---
+            if state_rotating:
+                # 回転モード（その場で旋回）
                 turn_pow = KP_TURN * heading_diff
-                if turn_pow > 0: turn_pow = max(turn_pow, 25)
-                else: turn_pow = min(turn_pow, -25)
+                # 最低出力を保証（これがないと弱い出力で止まって唸るだけになる）
+                if turn_pow > 0: turn_pow = max(turn_pow, 30) # 25->30へ少し強化
+                else: turn_pow = min(turn_pow, -30)
                 set_motor_speed(-turn_pow, turn_pow) 
             else:
+                # 直進モード（走りながら修正）
                 correction = heading_diff * KP_DIST
                 l_speed = BASE_SPEED - correction
                 r_speed = BASE_SPEED + correction
