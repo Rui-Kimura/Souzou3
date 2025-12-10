@@ -25,8 +25,8 @@ INFLATION_RADIUS = 6
 
 # --- モーター制御設定 ---
 BASE_SPEED = 80.0
-KP_DIST = -1.5  # 直進補正ゲイン
-KP_TURN = -1.2  # 回転制御ゲイン
+KP_DIST = 1.5  # 直進補正ゲイン
+KP_TURN = 1.2  # 回転制御ゲイン
 TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
 DIST_THRESHOLD_MM = 40.0 # 目標点到達許容誤差
 
@@ -308,11 +308,6 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
 
 # ======== 変更箇所: target_pos_mm (物理座標) を受け取るように変更 ========
 def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
-    """
-    現在地から目標物理座標までの経路を計算して移動。
-    target_pos_mm = (x_mm, y_mm, angle)
-    """
-    # 物理座標(mm) を Grid座標(index) に変換して A* に渡す
     target_x_mm, target_y_mm, target_angle = target_pos_mm
     
     goal_grid_x = int(target_x_mm / GRID_SIZE_MM)
@@ -322,103 +317,91 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     with position_lock:
         start_grid = robot.get_grid_pos()
     
-    print(f"経路計画開始: Start Grid{start_grid} -> Goal Grid{goal_grid} (Target mm: {target_x_mm:.1f}, {target_y_mm:.1f})")
-
+    print(f"Start: {start_grid} -> Goal: {goal_grid}")
     path = _planner.get_path_astar(start_grid, goal_grid)
     
     if not path:
-        print("エラー: 経路が見つかりません。")
+        print("経路なし")
         return False
     
-    print(f"経路決定: {len(path)} ステップ")
-    
-    # 経路の各ポイントを順に通過
+    # 状態管理フラグ（True: その場で旋回中, False: 直進中）
+    state_turning = True 
+
     for i in range(1, len(path)):
         next_node = path[i]
         
-        # 基本的にはグリッドの中心を目指す
+        # マップ上のY軸は「下」がプラス、ロボットは「上(前)」に進む前提
+        # ここは変更せず、そのまま物理座標へ
         next_target_x_mm = next_node[0] * GRID_SIZE_MM + GRID_SIZE_MM/2
         next_target_y_mm = next_node[1] * GRID_SIZE_MM + GRID_SIZE_MM/2
         
-        # ★最終ステップのみ、ユーザー指定の正確な座標を目指すように上書き
         if i == len(path) - 1:
             next_target_x_mm = target_x_mm
             next_target_y_mm = target_y_mm
         
-        print(f"WayPoint {i}/{len(path)-1}: {next_node} (mm: {next_target_x_mm:.1f}, {next_target_y_mm:.1f}) を目指します")
+        print(f"Next WP: ({next_target_x_mm:.0f}, {next_target_y_mm:.0f})")
 
-        state_rotating = True
-        # --- ウェイポイント到達ループ ---
         while True:            
             with position_lock:
-                current_x = robot.x
-                current_y = robot.y
-                current_heading = robot.heading
+                cx = robot.x
+                cy = robot.y
+                ch = robot.heading
 
-            dx_global = next_target_x_mm - current_x
-            dy_global = next_target_y_mm - current_y
-            distance = math.sqrt(dx_global**2 + dy_global**2)
+            dx = next_target_x_mm - cx
+            dy = next_target_y_mm - cy
+            dist = math.sqrt(dx**2 + dy**2)
             
-            if distance < DIST_THRESHOLD_MM:
-                print("WayPoint 到達")
+            if dist < DIST_THRESHOLD_MM:
                 set_motor_speed(0, 0)
                 break
 
-            target_angle_rad = math.atan2(dx_global, dy_global)
-            target_angle_deg = math.degrees(target_angle_rad)
-            if target_angle_deg < 0: target_angle_deg += 360
+            # ★重要: Y軸が画像座標(下がプラス)の場合、ロボット座標(前がプラス)に合わせるため -dy
+            # もしマップが数学座標(上がプラス)なら dy に戻す
+            target_rad = math.atan2(dx, -dy)
+            target_deg = math.degrees(target_rad)
+            if target_deg < 0: target_deg += 360
 
-            heading_diff = (target_angle_deg - current_heading + 180) % 360 - 180
+            # 角度差分 (-180 ~ +180)
+            diff = (target_deg - ch + 180) % 360 - 180
 
-            # --- ヒステリシス制御 ---
-            # 角度ズレが大きい(>20)なら回転モードへ
-            # 角度ズレが小さい(<5)なら直進モードへ
-            # その中間(5~20)は「今の状態を維持」する
-            if abs(heading_diff) > 20.0:
-                state_rotating = True
-            elif abs(heading_diff) < 5.0:
-                state_rotating = False
+            # --- デバッグログ ---
+            # これを見て「行きたい方向(Tgt)」が正しいか確認してください
+            # 例: 右前に行きたいのに Tgt が 220 (左後ろ) とかになっていないか
+            print(f"Tgt:{target_deg:.0f} Cur:{ch:.0f} Diff:{diff:.0f} Dist:{dist:.0f} Mode:{'TURN' if state_turning else 'GO'}")
+
+            # --- ヒステリシス制御 (振動対策) ---
+            # 一度回転モードに入ったら、角度がしっかり合うまで(例:5度以内)回転を続ける
+            # 一度直進モードに入ったら、角度が大きくずれるまで(例:30度以上)回転に戻らない
+            if state_turning:
+                if abs(diff) < 10.0: # 許容範囲に入ったら直進モードへ
+                    state_turning = False
+                    set_motor_speed(0, 0) # 反動を消すため一瞬止める
+                    time.sleep(0.1)
+                else:
+                    # 回転継続
+                    turn_pow = KP_TURN * diff
+                    # 最小パワーの確保（モーターが唸るだけで動かないのを防ぐ）
+                    min_p = 35 # 少し強めに
+                    if turn_pow > 0: turn_pow = max(turn_pow, min_p)
+                    else: turn_pow = min(turn_pow, -min_p)
+                    set_motor_speed(-turn_pow, turn_pow)
+
+            else: # 直進モード
+                if abs(diff) > 30.0: # ズレが大きくなりすぎたら回転モードへ戻る
+                    state_turning = True
+                    set_motor_speed(0, 0)
+                else:
+                    # 直進補正
+                    correction = diff * KP_DIST
+                    # ベース速度を少し落として安定させる
+                    curr_base = BASE_SPEED
+                    l = curr_base - correction
+                    r = curr_base + correction
+                    set_motor_speed(l, r)
             
-            # --- モーター出力 ---
-            if state_rotating:
-                # 回転モード（その場で旋回）
-                turn_pow = KP_TURN * heading_diff
-                # 最低出力を保証（これがないと弱い出力で止まって唸るだけになる）
-                if turn_pow > 0: turn_pow = max(turn_pow, 30) # 25->30へ少し強化
-                else: turn_pow = min(turn_pow, -30)
-                set_motor_speed(-turn_pow, turn_pow) 
-            else:
-                # 直進モード（走りながら修正）
-                correction = heading_diff * KP_DIST
-                l_speed = BASE_SPEED - correction
-                r_speed = BASE_SPEED + correction
-                set_motor_speed(l_speed, r_speed)
-            
-            time.sleep(0.02)
+            time.sleep(0.05) # ループ速度調整
 
-    print("目標地点座標に到着しました。")
     set_motor_speed(0, 0)
-
-    # 最終角度への回転 
-    if target_angle is not None:
-        print(f"最終角度調整: {target_angle}度 へ回転します")
-        while True:
-            with position_lock:
-                current_heading = robot.heading
-            
-            heading_diff = (target_angle - current_heading + 180) % 360 - 180
-            
-            if abs(heading_diff) <= TURN_THRESHOLD_DEG:
-                print("最終角度到達")
-                set_motor_speed(0, 0)
-                break
-            
-            turn_pow = KP_TURN * heading_diff
-            if turn_pow > 0: turn_pow = max(turn_pow, 25)
-            else: turn_pow = min(turn_pow, -25)
-            set_motor_speed(-turn_pow, turn_pow)
-            time.sleep(0.02)
-
     return True
 
 def move_linear(status):
