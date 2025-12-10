@@ -615,8 +615,9 @@ def main():
                 continue
             #END WHILE(manual_control)
             time.sleep(0.05)
-            buf_queue = move_queue.get()
+            
             if(move_queue.qsize() > 0):
+                buf_queue = move_queue.get()
                 print("queue now")
                 print(move_queue.qsize())
                 match buf_queue:
