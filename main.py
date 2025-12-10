@@ -617,9 +617,12 @@ def main():
             time.sleep(0.05)
             buf_queue = move_queue.get()
             if(buf_queue.qsize() > 0):
+                print("queue now")
+                print(buf_queue.qsize())
                 match buf_queue:
                     case  int(x) if buf_queue == AUTOMOVE:
                         # 修正: グローバル変数の名前変更に対応
+                        print("auto move")
                         move_to_target(planner, robot, bno, pmw, target_pose)
                     #END CASE AUTOMOVE
 
