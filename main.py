@@ -151,7 +151,7 @@ class RobotState:
         dx_global = dist_fwd * math.sin(rad) + dist_side * math.cos(rad)
         dy_global = -(dist_fwd * math.cos(rad) - dist_side * math.sin(rad))
 
-        self.x += dx_global
+        self.x -= dx_global
         self.y += dy_global
 
     def get_grid_pos(self):
@@ -295,7 +295,7 @@ def get_bno_heading(sensor):
 
 def monitor_position(robot_instance, bno_sensor, pmw_sensor):
     while True:
-        h = 180 - get_bno_heading(bno_sensor)
+        h = 0 - get_bno_heading(bno_sensor)
         try:
             dx, dy = pmw_sensor.get_motion()
         except:
