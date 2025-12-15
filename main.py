@@ -16,6 +16,8 @@ import uvicorn
 import threading
 import queue
 
+SAVED_POINTS_FILE = "saved_points.dat"
+
 # --- マップ・グリッド設定 ---
 GRID_SIZE_MM = 50.0      # 1マスの大きさ (mm)
 ROBOT_WIDTH_MM = 400.0   # 筐体幅
@@ -431,7 +433,9 @@ async def add_my_headers(request: Request, call_next):
     return response
 @app.get("/")
 async def root():
-    return {"message":"Hello World"}
+    return {"message":"Привет! Я MoFeL!!"}
+
+# ソフトウェア系受応答API
 @app.get("/position")
 async def position():
     with position_lock:
@@ -448,6 +452,12 @@ async def costmapdata():
     if planner and hasattr(planner, 'cost_map'):
         return {"mapdata": planner.cost_map.tolist()}
     return {"mapdata": []}
+
+@app.get("/saved_target_points")
+async def target_points():
+    with open(SAVED_POINTS_FILE, mode='r', encoding='utf-8') as file:
+        data = json.load(file)
+        return data
 
 @app.get("/target_point")
 async def target_point():
@@ -471,6 +481,8 @@ async def set_target_point(
         "y":y,
         "angle":angle
     }
+
+# 物理動作制御用API
 
 @app.get("/automove_start")
 async def automove_start():
