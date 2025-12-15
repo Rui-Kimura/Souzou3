@@ -12,6 +12,8 @@ import serial
 import serial.tools.list_ports
 
 from fastapi import FastAPI, Request
+from pydantic import BaseModel
+from typing import List
 import uvicorn
 import threading
 import queue
@@ -81,6 +83,11 @@ planner = None
 position_lock = threading.Lock()
 
 
+class Point(BaseModel):
+    name: str
+    x: float
+    y: float
+    angle: float
 
 # ---  ArduinoController ---
 class ArduinoController:
@@ -458,6 +465,28 @@ async def target_points():
     with open(SAVED_POINTS_FILE, mode='r', encoding='utf-8') as file:
         data = json.load(file)
         return data
+
+@app.post("/saved")
+def save_points(points: List[Point]):
+    saved_points_list = []
+    for point in points:
+        saved_points_list.append({
+            "name": point.name, 
+            "x": point.x, 
+            "y": point.y, 
+            "angle": point.angle
+        })
+    
+    output_data = {
+        "points": saved_points_list
+    }
+    try:
+        with open(SAVED_POINTS_FILE, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False)
+        return {"message": "saved"}
+    
+    except Exception as e:
+        return {"message": "error", "error": str(e)}
 
 @app.get("/target_point")
 async def target_point():
