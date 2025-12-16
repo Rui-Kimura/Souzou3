@@ -1,4 +1,5 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+import asyncio
 from pydantic import BaseModel
 from typing import List, Optional
 import uvicorn
@@ -17,9 +18,10 @@ import os
 # 1. 設定・定数
 # ==========================================
 
-SAVED_POINTS_FILE = "../saved_points.dat"
-MAP_DATA_PATH = "../room.dat"
-PROFILE_FILE = "../bno_profile.json"
+SAVED_POINTS_FILE = "saved_points.dat"
+MAP_DATA_PATH = "room.dat"
+PROFILE_FILE = "bno_profile.json"
+STOCKER_FILE = "stocker.dat"
 
 # グリッド・マップ設定
 GRID_SIZE_MM = 50.0       # 1マスの大きさ (mm)
@@ -73,6 +75,29 @@ class Point(BaseModel):
     x: float
     y: float
     angle: float
+
+# WebSocket接続管理クラス
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: str):
+        # 接続が切れているクライアントへの送信エラーを防ぐためコピーを使用
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_text(message)
+            except Exception:
+                self.disconnect(connection)
+
+manager = ConnectionManager()
 
 class ArduinoController:
     """Arduino接続エミュレータ"""
@@ -332,11 +357,24 @@ def background_simulation():
 app = FastAPI()
 arduino = ArduinoController()
 
+async def broadcast_position_task():
+    while True:
+        await asyncio.sleep(0.05) # 50ms間隔
+        with position_lock:
+            # メッセージ形式を統一: type識別子をつける
+            data = {
+                "type": "position",
+                "x": robot_state["x"],
+                "y": robot_state["y"],
+                "angle": robot_state["angle"]
+            }
+        await manager.broadcast(json.dumps(data))
+
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=background_simulation, daemon=True)
     t.start()
-
+    asyncio.create_task(broadcast_position_task())
 @app.middleware("http")
 async def add_cors_header(request: Request, call_next):
     response = await call_next(request)
@@ -346,6 +384,18 @@ async def add_cors_header(request: Request, call_next):
 @app.get("/")
 def root():
     return {"message": "Simulation API Online"}
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # クライアントからのデータ受信（必要なら処理を追加）
+            data = await websocket.receive_text()
+            # print(f"Client sent: {data}") 
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 
 @app.get("/position")
 def get_position():
@@ -374,9 +424,13 @@ def get_costmapdata():
 def get_target_point():
     return target_state
 
-@app.get("/set_target_point")
-def set_target_point(x: float, y: float, angle: float):
+@app.post("/set_target_point")
+def set_target_point(point: Point):
+    #以下の処理をPOSTに変更、Pointモデルに書き換え
     global target_state, current_goal_grid
+    x = point.x
+    y = point.y 
+    angle = point.angle
     target_state = {"x": x, "y": y, "angle": angle}
     gx = int(x / GRID_SIZE_MM)
     gy = int(y / GRID_SIZE_MM)
@@ -434,6 +488,27 @@ def delete_target_point(name: str):
         return {"message": "deleted"}
     except Exception as e:
         return {"message": "error", "error": str(e)}
+
+@app.post("/set_stocker")
+def set_stocker(stocker:Point):
+    data = stocker.dict()
+    try:
+        with open(STOCKER_FILE, "w", encoding="utf-8") as wf:
+            json.dump(data, wf, ensure_ascii=False, indent=4)
+        return {"message": "stocker set"}
+    except Exception as e:
+        return {"message": "error", "error": str(e)}
+    
+
+@app.get("/get_stocker")
+def get_stocker():
+    if os.path.exists(STOCKER_FILE):
+        try:
+            with open(STOCKER_FILE, mode='r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {"message": "error reading stocker"}
+    return {"message": "no stocker set"}
 
 @app.get("/automove_start")
 def automove_start():
