@@ -1,6 +1,16 @@
 "use client"
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Typography, Card } from "@mui/material";
+import { 
+    Box, 
+    Typography, 
+    Card, 
+    Button, 
+    Dialog, 
+    DialogTitle, 
+    DialogContent, 
+    DialogContentText, 
+    DialogActions 
+} from "@mui/material";
 import Map from '@/components/Map'
 
 interface Point {
@@ -12,7 +22,11 @@ interface Point {
 
 export default function Page() {
     const [points, setPoints] = useState<Point[]>([]);
+    const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
     
+    const [isMoveConfirmOpen, setMoveConfirmOpen] = useState(false);
+    const [pendingMovePoint, setPendingMovePoint] = useState<Point | null>(null);
+
     const containerRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const [scale, setScale] = useState(1);
@@ -20,7 +34,7 @@ export default function Page() {
     useEffect(() => {
         const fetchPoints = async () => {
             try {
-                const response = await fetch('http://localhost:8100/saved_target_points');
+                const response = await fetch('/api/local/saved_target_points');
                 const data = await response.json();
                 setPoints(data);
             } catch (error) {
@@ -38,7 +52,6 @@ export default function Page() {
         const updateScale = () => {
             const containerRect = container.getBoundingClientRect();
             
-            // コンテンツ(Map)の本来のサイズを取得
             const contentWidth = content.offsetWidth; 
             const contentHeight = content.offsetHeight;
             const containerWidth = containerRect.width;
@@ -49,10 +62,8 @@ export default function Page() {
             const scaleX = containerWidth / contentWidth;
             const scaleY = containerHeight / contentHeight;
             
-            // 縦横小さい方に合わせてフィットさせる
             const newScale = Math.min(scaleX, scaleY);
             
-            // 縮小のみ（拡大したい場合は : 1 を削除）
             setScale(newScale < 1 ? newScale : 1);
         };
 
@@ -62,25 +73,61 @@ export default function Page() {
 
         observer.observe(container);
         observer.observe(content);
-        updateScale(); // 初期実行
+        updateScale();
 
         return () => observer.disconnect();
     }, []);
 
+    const handleMoveClick = (point: Point) => {
+        setPendingMovePoint(point);
+        setMoveConfirmOpen(true);
+    };
+
+    const executeAutoMove = async () => {
+        if (!pendingMovePoint) return;
+        
+        try {
+            const resSet = await fetch('/api/local/set_target_point', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(pendingMovePoint),
+            });
+            
+            if (!resSet.ok) {
+                console.error('Failed to set target point');
+                return;
+            }
+
+            const resStart = await fetch('/api/local/automove_start');
+            if (resStart.ok) {
+                console.log(`Auto move started to ${pendingMovePoint.name}`);
+            } else {
+                console.error('Failed to start automove');
+            }
+
+        } catch (error) {
+            console.error('Error sending move command:', error);
+        } finally {
+            setMoveConfirmOpen(false);
+            setPendingMovePoint(null);
+        }
+    };
+
     return (
         <Box sx={{ 
-            // 【変更点】position: fixed で画面に完全固定し、スクロールを排除
             position: "fixed",
-            inset: 0, // top: 0, right: 0, bottom: 0, left: 0 と同じ
+            inset: 0,
             width: "100%",
             height: "100%",
-            overflow: "hidden", // 全体のスクロールバーを禁止
+            overflow: "hidden",
             
             display: "flex", 
             flexDirection: "column", 
             bgcolor: "background.default",
-            p: 2, // 全体のパディング
-            boxSizing: "border-box" // パディングを含めてサイズ計算
+            p: 2, 
+            boxSizing: "border-box"
         }}>
             <Box sx={{ pb: 2, flexShrink: 0 }}>
                 <Card sx={{ p: 1 }}>
@@ -100,7 +147,7 @@ export default function Page() {
                 <Box 
                     ref={containerRef}
                     sx={{ 
-                        flex: 1, 
+                        flex: 1, // 余ったスペースをすべて使う
                         display: "flex", 
                         justifyContent: "center", 
                         alignItems: "center",
@@ -108,7 +155,8 @@ export default function Page() {
                         border: "1px solid #ddd", 
                         borderRadius: 1,
                         bgcolor: "#fff",
-                        position: "relative"
+                        position: "relative",
+                        minHeight: 0 // Flexアイテムが潰れるのを防ぐおまじない
                     }}
                 >
                     <Box 
@@ -127,8 +175,12 @@ export default function Page() {
 
                 {/* 地点一覧エリア */}
                 <Box sx={{ 
+                    // 【修正箇所】
+                    // 縦画面(xs): 幅100%, 高さ40% (残りの60%をMapが使う)
+                    // 横画面(md): 幅300px, 高さ100% (残りの幅をMapが使う)
                     width: { xs: "100%", md: "300px" }, 
-                    height: "100%", 
+                    height: { xs: "40%", md: "100%" }, 
+                    
                     display: "flex",
                     flexDirection: "column",
                     overflow: "hidden"
@@ -143,20 +195,66 @@ export default function Page() {
                         pr: 1 
                     }}>
                         {
-                            points.map((point, index) => (
-                                <Box key={index} sx={{ border: "1px solid #ccc", p: 1, mb: 1, borderRadius: 1, bgcolor: "background.paper" }}>
-                                    <Typography variant="subtitle2" fontWeight="bold">{point.name}</Typography>
-                                    <Box sx={{ pl: 1, fontSize: "0.875rem" }}>
-                                        <Typography variant="caption" display="block">X: {point.x}</Typography>
-                                        <Typography variant="caption" display="block">Y: {point.y}</Typography>
-                                        <Typography variant="caption" display="block">角度: {point.angle}</Typography>
+                            points.map((point, index) => {
+                                const isSelected = selectedPointIndex === index;
+                                return (
+                                    <Box 
+                                        key={index} 
+                                        onClick={() => setSelectedPointIndex(isSelected ? null : index)}
+                                        sx={{ 
+                                            border: isSelected ? "2px solid #1976d2" : "1px solid #ccc", 
+                                            p: 1, 
+                                            mb: 1, 
+                                            borderRadius: 1, 
+                                            bgcolor: isSelected ? "#e3f2fd" : "background.paper",
+                                            cursor: "pointer",
+                                            transition: "all 0.2s"
+                                        }}
+                                    >
+                                        <Typography variant="subtitle2" fontWeight="bold">{point.name}</Typography>
+                                        <Box sx={{ pl: 1, fontSize: "0.875rem" }}>
+                                            <Typography variant="caption" display="block">X: {point.x}</Typography>
+                                            <Typography variant="caption" display="block">Y: {point.y}</Typography>
+                                            <Typography variant="caption" display="block">角度: {point.angle}</Typography>
+                                        </Box>
+
+                                        {isSelected && (
+                                            <Button 
+                                                variant="contained" 
+                                                color="secondary" 
+                                                fullWidth 
+                                                size="small"
+                                                sx={{ mt: 1 }}
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    handleMoveClick(point);
+                                                }}
+                                            >
+                                                ここに移動
+                                            </Button>
+                                        )}
                                     </Box>
-                                </Box>
-                            ))
+                                );
+                            })
                         }
                     </Box>
                 </Box>
             </Box>
+
+            <Dialog open={isMoveConfirmOpen} onClose={() => setMoveConfirmOpen(false)}>
+                <DialogTitle>移動確認</DialogTitle>
+                <DialogContent>
+                    <DialogContentText>
+                        地点「{pendingMovePoint?.name}」へ移動を開始しますか？
+                    </DialogContentText>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={() => setMoveConfirmOpen(false)}>キャンセル</Button>
+                    <Button onClick={executeAutoMove} color="secondary" variant="contained" autoFocus>
+                        移動開始
+                    </Button>
+                </DialogActions>
+            </Dialog>
         </Box>
     )
 }

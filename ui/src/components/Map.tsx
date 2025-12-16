@@ -13,6 +13,7 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
+  DialogContentText, // 追加
   TextField,
   DialogActions,
   Snackbar,
@@ -70,6 +71,10 @@ export default function Map() {
   const [pointName, setPointName] = useState("");
   const [pointAngle, setPointAngle] = useState<string | number>(0);
 
+  // ★追加: 移動確認ダイアログ用State
+  const [isMoveConfirmOpen, setMoveConfirmOpen] = useState(false);
+  const [pendingMovePoint, setPendingMovePoint] = useState<Point | null>(null);
+
   const [warningOpen, setWarningOpen] = useState(false);
   const [warningMessage, setWarningMessage] = useState(""); 
   const [snackMessage, setSnackMessage] = useState("");
@@ -88,7 +93,7 @@ export default function Map() {
 
   // --- WebSocket接続 ---
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8100/ws");
+    const ws = new WebSocket("/api/local/ws");
 
     ws.onopen = () => {
       console.log("Connected to WebSocket");
@@ -121,7 +126,6 @@ export default function Map() {
     } catch (error) { console.error(error); }
   };
 
-  // 修正: mode引数を追加
   const fetch_costmapdata = async (mode = "normal") => {
     try {
       const res = await fetch(`/api/local/costmapdata?mode=${mode}`);
@@ -236,7 +240,7 @@ export default function Map() {
     // 青点(0,0): 壁NG, コストNG
     const blueRes = checkAreaOverlap(tx, ty, angle, [{x:0, y:0}]);
     if (blueRes.walls > 0 || blueRes.out > 0) return { valid: false, msg: "中心点が壁または範囲外です" };
-    if (blueRes.costs > 0) return { valid: false, msg: "水色点はコストマップに進入できません" };
+    if (blueRes.costs > 0) return { valid: false, msg: "水色点は赤斜線内に進入できません" };
 
     // 緑枠: 壁NG (コストOK)
     const stockerRes = checkAreaOverlap(tx, ty, angle, GREEN_FRAME_POINTS);
@@ -270,7 +274,7 @@ export default function Map() {
     fetch_costmapdata("base");
   };
 
-const handlePlacementMove = (clientX: number, clientY: number) => {
+  const handlePlacementMove = (clientX: number, clientY: number) => {
     if (isPlacementFrozen || !mapContainerRef.current || !mapdata.length) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
@@ -338,30 +342,65 @@ const handlePlacementMove = (clientX: number, clientY: number) => {
     setNameDialogOpen(true);
   };
 
-  const handleMoveHere = async () => {
+  // 1. 移動ボタンクリック（確認ダイアログ表示）
+  const handleMoveHere = () => {
     if (!selectedGrid) return;
     const physicalX = selectedGrid.c * TILE_WIDTH + TILE_WIDTH / 2.0;
     const physicalY = selectedGrid.r * TILE_WIDTH + TILE_WIDTH / 2.0;
     const angle = selectedSavedPoint ? selectedSavedPoint.angle : 0;
-    const Point = { name:"", x: physicalX, y: physicalY, angle: angle };
-
-    try {
-      const res = await fetch("/api/local/set_target_point", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(Point),
-      });
-      if (res.ok) {
-        console.log("Target updated to click position");
-        fetch_target_point();
-      } else {
-        console.error("Failed to update target");
-      }
-    } catch (error) {
-      console.error("Error moving to point:", error);
-    }
+    
+    // 一時保存して確認画面へ
+    const point: Point = { name: "Target", x: physicalX, y: physicalY, angle: angle };
+    setPendingMovePoint(point);
+    setMoveConfirmOpen(true);
+    
     handlePopoverClose();
   };
+
+  // 2. 移動実行（API呼び出し）
+  const executeAutoMove = async () => {
+    if (!pendingMovePoint) return;
+
+    try {
+      // ターゲットをセット
+      const resSet = await fetch("/api/local/set_target_point", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(pendingMovePoint),
+      });
+
+      if (!resSet.ok) {
+        console.error("Failed to update target");
+        setSnackMessage("目標地点の設定に失敗しました");
+        setSnackOpen(true);
+        return;
+      }
+      
+      // 目標地点表示を更新
+      fetch_target_point();
+
+      // 自動移動開始コマンド
+      const resStart = await fetch("/api/local/automove_start");
+      if (resStart.ok) {
+        console.log("Auto move started");
+        setSnackMessage("自動移動を開始しました");
+      } else {
+        console.error("Failed to start automove");
+        setSnackMessage("移動開始コマンドに失敗しました");
+      }
+      setSnackOpen(true);
+
+    } catch (error) {
+      console.error("Error executing automove:", error);
+      setSnackMessage("通信エラーが発生しました");
+      setSnackOpen(true);
+    } finally {
+      // ダイアログを閉じる
+      setMoveConfirmOpen(false);
+      setPendingMovePoint(null);
+    }
+  };
+
 
   const handleSavePoint = async () => {
     if (!selectedGrid) return;
@@ -477,7 +516,7 @@ const handlePlacementMove = (clientX: number, clientY: number) => {
             />
 
             {/* ターゲットアイコン */}
-            {/*}
+            {/*
             <Box
               sx={{
                 position: "absolute", width: 0, height: 0,
@@ -577,6 +616,22 @@ const handlePlacementMove = (clientX: number, clientY: number) => {
           </Box>
         </Popover>
 
+        {/* --- 移動確認ダイアログ (新規追加) --- */}
+        <Dialog open={isMoveConfirmOpen} onClose={() => setMoveConfirmOpen(false)}>
+          <DialogTitle>移動確認</DialogTitle>
+          <DialogContent>
+            <DialogContentText>
+              本当にこの地点へ移動を開始しますか？
+            </DialogContentText>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setMoveConfirmOpen(false)}>キャンセル</Button>
+            <Button onClick={executeAutoMove} color="secondary" variant="contained" autoFocus>
+              移動開始
+            </Button>
+          </DialogActions>
+        </Dialog>
+
         <Dialog open={isNameDialogOpen} onClose={() => setNameDialogOpen(false)}>
           <DialogTitle>{selectedSavedPoint ? "ポイントの編集" : "目標地点の追加"}</DialogTitle>
           <DialogContent>
@@ -638,7 +693,7 @@ const handlePlacementMove = (clientX: number, clientY: number) => {
           <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#2c3e50", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">壁</Typography></Stack>
           <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#3498db", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">登録地点</Typography></Stack>
           <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">通路</Typography></Stack>
-          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5, backgroundImage: "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.25) 0, rgba(255, 0, 0, 0.25) 2px, transparent 2px, transparent 6px)" }} /><Typography variant="caption" color="text.secondary">コスト領域</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5, backgroundImage: "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.25) 0, rgba(255, 0, 0, 0.25) 2px, transparent 2px, transparent 6px)" }} /><Typography variant="caption" color="text.secondary">衝突回避領域</Typography></Stack>
         </Stack>
       </Container>
     </Box>
