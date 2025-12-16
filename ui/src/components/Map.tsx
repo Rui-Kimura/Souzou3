@@ -17,7 +17,7 @@ import {
   DialogActions,
   Snackbar,
   Grid,
-  Slider, 
+  Slider,
 } from "@mui/material";
 
 interface Point {
@@ -38,9 +38,7 @@ export default function Map() {
   const TILE_SIZE = 20;
   const TILE_WIDTH = 50; // 50mm
 
-  // --- 修正: ストッカー形状定義 (180度反転) ---
-  // ロボット前方（Y軸マイナス方向）に配置
-  // 基準点(0,0)から前方に3マス(150mm)空けて、4マス目(-200mm)からアーム開始
+  // --- ストッカー形状定義 (180度反転: 前方配置) ---
   const GREEN_FRAME_POINTS = [
     // 奥のバー (Y: -400mm, 幅11マス)
     ...Array.from({ length: 11 }, (_, i) => ({ x: -250 + i * 50, y: -400 })),
@@ -123,9 +121,10 @@ export default function Map() {
     } catch (error) { console.error(error); }
   };
 
-  const fetch_costmapdata = async () => {
+  // 修正: mode引数を追加
+  const fetch_costmapdata = async (mode = "normal") => {
     try {
-      const res = await fetch("/api/local/costmapdata");
+      const res = await fetch(`/api/local/costmapdata?mode=${mode}`);
       const data = await res.json();
       setCostmapData(data.costmapdata || []);
     } catch (error) { console.error(error); }
@@ -160,9 +159,11 @@ export default function Map() {
     } catch (error) { console.error(error); }
   };
 
-
   useEffect(() => {
-    fetch_mapdata(); fetch_costmapdata(); fetch_saved_points(); fetch_stocker();
+    fetch_mapdata();
+    fetch_costmapdata("normal");
+    fetch_saved_points();
+    fetch_stocker();
   }, []);
 
   // 既存ストッカーの描画反映
@@ -265,68 +266,27 @@ export default function Map() {
     setPlacementFrozen(false);
     setSnackMessage("配置モード: マスに描画されます。クリックで仮固定。");
     setSnackOpen(true);
+
+    fetch_costmapdata("base");
   };
 
-  const handlePlacementMove = (clientX: number, clientY: number) => {
+const handlePlacementMove = (clientX: number, clientY: number) => {
     if (isPlacementFrozen || !mapContainerRef.current || !mapdata.length) return;
     
     const rect = mapContainerRef.current.getBoundingClientRect();
     const mouseCol = Math.floor((clientX - rect.left) / TILE_SIZE);
     const mouseRow = Math.floor((clientY - rect.top) / TILE_SIZE);
+    
     const mousePhysX = mouseCol * TILE_WIDTH + TILE_WIDTH / 2.0;
     const mousePhysY = mouseRow * TILE_WIDTH + TILE_WIDTH / 2.0;
 
-    let bestX = mousePhysX, bestY = mousePhysY;
-    let bestAdjacencyScore = -1;
-    let foundValid = false;
-    const SEARCH_RADIUS = 3;
-    const rad = (tempStocker.angle * Math.PI) / 180;
-    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const validationResult = validatePlacement(mousePhysX, mousePhysY, tempStocker.angle);
 
-    for (let dr = -SEARCH_RADIUS; dr <= SEARCH_RADIUS; dr++) {
-      for (let dc = -SEARCH_RADIUS; dc <= SEARCH_RADIUS; dc++) {
-        const testX = mousePhysX + dc * TILE_WIDTH;
-        const testY = mousePhysY + dr * TILE_WIDTH;
-        
-        if (!validatePlacement(testX, testY, tempStocker.angle).valid) continue;
+    setTempStocker(prev => ({ ...prev, x: mousePhysX, y: mousePhysY }));
+    updateStockerGridKeys(mousePhysX, mousePhysY, tempStocker.angle);
 
-        let currentScore = 0;
-        for (const p of GREEN_FRAME_POINTS) {
-            const absX = testX + (p.x * cos - p.y * sin);
-            const absY = testY + (p.x * sin + p.y * cos);
-            const c = Math.floor(absX / TILE_WIDTH);
-            const r = Math.floor(absY / TILE_WIDTH);
-            if (isWall(r+1, c)) currentScore++;
-            if (isWall(r-1, c)) currentScore++;
-            if (isWall(r, c+1)) currentScore++;
-            if (isWall(r, c-1)) currentScore++;
-        }
-
-        if (currentScore > bestAdjacencyScore) {
-            bestAdjacencyScore = currentScore;
-            bestX = testX; bestY = testY;
-            foundValid = true;
-        } else if (currentScore === bestAdjacencyScore && foundValid) {
-             if (Math.hypot(testX - mousePhysX, testY - mousePhysY) < Math.hypot(bestX - mousePhysX, bestY - mousePhysY)) {
-                bestX = testX; bestY = testY;
-            }
-        }
-      }
-    }
-
-    const finalX = foundValid ? bestX : mousePhysX;
-    const finalY = foundValid ? bestY : mousePhysY;
-    
-    setTempStocker(prev => ({ ...prev, x: finalX, y: finalY }));
-    updateStockerGridKeys(finalX, finalY, tempStocker.angle);
-
-    if (foundValid) {
-        setPlacementValid(true);
-        setValidationMsg(bestAdjacencyScore > 0 ? "壁に吸着中" : "");
-    } else {
-        setPlacementValid(false);
-        setValidationMsg(validatePlacement(mousePhysX, mousePhysY, tempStocker.angle).msg);
-    }
+    setPlacementValid(validationResult.valid);
+    setValidationMsg(validationResult.msg);
   };
 
   const onMapMouseMove = (e: React.MouseEvent) => { if (isPlacementMode) handlePlacementMove(e.clientX, e.clientY); };
@@ -341,7 +301,11 @@ export default function Map() {
 
     if (isWall) return;
 
-    if (isCost && !stockerGridKeys.has(`${rowIndex}-${colIndex}`)) {
+    if (stockerGridKeys.has(`${rowIndex}-${colIndex}`)) {
+      return;
+    }
+    
+    if (isCost) {
       setWarningMessage("周囲の構造物と干渉する恐れがあるため目標地点を設定できません。");
       setWarningOpen(true);
       return;
@@ -462,7 +426,11 @@ export default function Map() {
       const res = await fetch("/api/local/set_stocker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(tempStocker) });
       if (res.ok) {
         setSnackMessage("ストッカーを登録しました"); setSnackOpen(true);
-        fetch_stocker(); setPlacementMode(false); setPlacementFrozen(false);
+        fetch_stocker(); 
+        setPlacementMode(false); 
+        setPlacementFrozen(false);
+        // ★保存完了したら通常マップに戻す
+        fetch_costmapdata("normal");
       }
     } catch (error) { console.error(error); }
   };
@@ -509,7 +477,7 @@ export default function Map() {
             />
 
             {/* ターゲットアイコン */}
-            {/*
+            {/*}
             <Box
               sx={{
                 position: "absolute", width: 0, height: 0,
@@ -553,7 +521,7 @@ export default function Map() {
                       sx={{
                         width: TILE_SIZE, height: TILE_SIZE, boxSizing: "border-box", position: "relative",
                         bgcolor: bgcolor, border: border, backgroundImage: bgImage,
-                        cursor: (!isWall && (!isCost || isStockerCell)) ? "pointer" : (isCost ? "not-allowed" : "default"),
+                        cursor: (!isWall && !isCost && !isStockerCell) ? "pointer" : (isCost ? "not-allowed" : "default"),
                         "&:hover": (!isWall && !isCost && !isPlacementMode) ? { bgcolor: "#d6eaf8" } : {}
                       }}
                     >
@@ -612,10 +580,10 @@ export default function Map() {
         <Dialog open={isNameDialogOpen} onClose={() => setNameDialogOpen(false)}>
           <DialogTitle>{selectedSavedPoint ? "ポイントの編集" : "目標地点の追加"}</DialogTitle>
           <DialogContent>
-            <Grid container spacing={2} sx={{ mt: 0.5 }}>
-                <Grid item xs={8}><TextField autoFocus margin="dense" label="地点名" type="text" fullWidth variant="standard" value={pointName} onChange={(e) => setPointName(e.target.value)} /></Grid>
-                <Grid item xs={4}><TextField margin="dense" label="角度 (deg)" type="number" fullWidth variant="standard" value={pointAngle} onChange={(e) => setPointAngle(e.target.value)} /></Grid>
-            </Grid>
+            <Box sx={{ display: 'flex', gap: 2, mt: 0.5 }}>
+                <TextField autoFocus margin="dense" label="地点名" type="text" fullWidth variant="standard" value={pointName} onChange={(e) => setPointName(e.target.value)} sx={{ flex: 2 }} />
+                <TextField margin="dense" label="角度 (deg)" type="number" fullWidth variant="standard" value={pointAngle} onChange={(e) => setPointAngle(e.target.value)} sx={{ flex: 1 }} />
+            </Box>
           </DialogContent>
           <DialogActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
             {selectedSavedPoint ? <Button onClick={handleDeletePoint} color="error">削除</Button> : <Box />}
@@ -650,6 +618,7 @@ export default function Map() {
                     setPlacementMode(false); setPlacementFrozen(false);
                     updateStockerGridKeys(existingStocker?.x ?? 0, existingStocker?.y ?? 0, existingStocker?.angle ?? 0);
                     if(!existingStocker) setStockerGridKeys(new Set());
+                    fetch_costmapdata("normal");
                 }}>キャンセル</Button>
                 <Button variant="contained" color="primary" onClick={handleCommitStocker} disabled={!placementValid || !isPlacementFrozen}>決定</Button>
              </Box>
