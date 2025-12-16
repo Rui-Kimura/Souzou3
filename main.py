@@ -385,40 +385,6 @@ def set_target_point(x: float, y: float, angle: float):
         print(f"ユーザー指定ターゲット: {current_goal_grid}")
     return target_state
 
-@app.get("/automove_start")
-def automove_start():
-    return {"auto": "started"}
-
-@app.get("/controll_api")
-def control_api(direction: int, speed: float, angle: float, rotate: bool):
-    global manual_direction, manual_speed, manual_angle, manual_rotate
-    manual_direction = direction
-    manual_speed = speed / 5.0
-    manual_angle = angle
-    manual_rotate = rotate
-    return {"status": "controlled"}
-
-@app.get("/set_manual_mode")
-def set_manual_mode(mode: bool):
-    global manual_control
-    manual_control = mode
-    print(f"Manual Mode: {manual_control}")
-    return {"manual_control": manual_control}
-
-@app.get("/linear")
-def linear_move(mode: str):
-    global manual_linear
-    if mode == "up": manual_linear = 1
-    elif mode == "down": manual_linear = -1
-    else: manual_linear = 0
-    return {"linear": manual_linear}
-
-@app.get("/slide")
-def slide_move(mode: str):
-    if mode == "open": arduino.send_command('o')
-    elif mode == "close": arduino.send_command('c')
-    return {"slide": mode}
-
 @app.get("/saved_target_points")
 def get_saved_points():
     if os.path.exists(SAVED_POINTS_FILE):
@@ -453,6 +419,55 @@ def save_points(point: Point):
         return {"message": "saved"}
     except Exception as e:
         return {"message": "error", "error": str(e)}
+
+@app.get("/delete_target_point")
+def delete_target_point(name: str):
+    # 指定された名前のポイントを削除
+    try:
+        points = []
+        if os.path.exists(SAVED_POINTS_FILE):
+            with open(SAVED_POINTS_FILE, "r", encoding="utf-8") as rf:
+                points = json.load(rf)
+        points = [p for p in points if p.get("name") != name]
+        with open(SAVED_POINTS_FILE, "w", encoding="utf-8") as wf:
+            json.dump(points, wf, ensure_ascii=False, indent=4)
+        return {"message": "deleted"}
+    except Exception as e:
+        return {"message": "error", "error": str(e)}
+
+@app.get("/automove_start")
+def automove_start():
+    return {"auto": "started"}
+
+@app.get("/controll_api")
+def control_api(direction: int, speed: float, angle: float, rotate: bool):
+    global manual_direction, manual_speed, manual_angle, manual_rotate
+    manual_direction = direction
+    manual_speed = speed / 5.0
+    manual_angle = angle
+    manual_rotate = rotate
+    return {"status": "controlled"}
+
+@app.get("/set_manual_mode")
+def set_manual_mode(mode: bool):
+    global manual_control
+    manual_control = mode
+    print(f"Manual Mode: {manual_control}")
+    return {"manual_control": manual_control}
+
+@app.get("/linear")
+def linear_move(mode: str):
+    global manual_linear
+    if mode == "up": manual_linear = 1
+    elif mode == "down": manual_linear = -1
+    else: manual_linear = 0
+    return {"linear": manual_linear}
+
+@app.get("/slide")
+def slide_move(mode: str):
+    if mode == "open": arduino.send_command('o')
+    elif mode == "close": arduino.send_command('c')
+    return {"slide": mode}
 
 def main():
     uvicorn.run(app, host="0.0.0.0", port=8100, log_level="info")
