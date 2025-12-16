@@ -117,14 +117,14 @@ export default function Page() {
 
     return (
         <Box sx={{ 
-            position: "fixed",
-            inset: 0,
+            // 【修正】position: fixed と inset: 0 を削除しました
+            // これにより、Layoutで確保されたコンテンツエリア内に正しく収まります
             width: "100%",
             height: "100%",
-            overflow: "hidden",
             
             display: "flex", 
             flexDirection: "column", 
+            overflow: "hidden", // ページ全体としてのスクロールは禁止(内部でスクロール)
             bgcolor: "background.default",
             p: 2, 
             boxSizing: "border-box"
@@ -147,7 +147,7 @@ export default function Page() {
                 <Box 
                     ref={containerRef}
                     sx={{ 
-                        flex: 1, // 余ったスペースをすべて使う
+                        flex: 1, 
                         display: "flex", 
                         justifyContent: "center", 
                         alignItems: "center",
@@ -156,7 +156,7 @@ export default function Page() {
                         borderRadius: 1,
                         bgcolor: "#fff",
                         position: "relative",
-                        minHeight: 0 // Flexアイテムが潰れるのを防ぐおまじない
+                        minHeight: 0 
                     }}
                 >
                     <Box 
@@ -175,12 +175,8 @@ export default function Page() {
 
                 {/* 地点一覧エリア */}
                 <Box sx={{ 
-                    // 【修正箇所】
-                    // 縦画面(xs): 幅100%, 高さ40% (残りの60%をMapが使う)
-                    // 横画面(md): 幅300px, 高さ100% (残りの幅をMapが使う)
                     width: { xs: "100%", md: "300px" }, 
                     height: { xs: "40%", md: "100%" }, 
-                    
                     display: "flex",
                     flexDirection: "column",
                     overflow: "hidden"

@@ -1,37 +1,32 @@
-"use client"
-import { Box, Button, Paper, Typography } from "@mui/material";
-import { useRouter } from 'next/navigation'
+"use client";
+
+import { Box } from "@mui/material";
+import mofelImg from "../res/mofel.png";
 
 export default function Home() {
-  const router = useRouter();
-  //URLを引数とするクリックイベントハンドラ
-  const handleClick = (url: string) => {
-    router.push(url);
-  }
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <Paper sx={{ width: "80%", p: 2 }}>
-        <Box>
-          <Typography variant="h6"sx={{p:2}}>メニュー</Typography>
-          <Box sx={{ display: "flex",flexWrap: "wrap",gap:2}}>
-            <Button onClick={() => handleClick('/automation')} variant="contained" color="primary" sx={{ width: "250px" }} >
-              自動移動
-            </Button>
-            <Button onClick={() => handleClick('/controller')} variant="contained" color="primary" sx={{ width: "250px" }} >
-              手動操作
-            </Button>
-            <Button onClick={() => handleClick('/map')} variant="contained" color="primary" sx={{ width: "250px" }} >
-              マップ表示
-            </Button>
-            <Button onClick={() => handleClick('/')} variant="contained" color="primary" sx={{ width: "250px" }} >
-              デモモード
-            </Button>
-            
-          </Box>
-
-        </Box>
-      </Paper>
-
+    <Box
+      sx={{
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        bgcolor: "#fafafa",
+        p: 2
+      }}
+    >
+      <Box
+        component="img"
+        src={mofelImg.src}
+        alt="MOFEL Product"
+        sx={{
+          maxWidth: "100%",
+          maxHeight: "100%",
+          objectFit: "contain",
+          filter: "drop-shadow(0px 10px 20px rgba(0,0,0,0.15))"
+        }}
+      />
     </Box>
   );
 }
