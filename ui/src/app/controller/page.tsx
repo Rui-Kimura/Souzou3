@@ -7,7 +7,6 @@ import { PanelContainer, MasconHandle, ReverserHandle, SemicircleMascon, Mechani
 import { Typography, IconButton, Tooltip } from '@mui/material';
 import FullscreenButton from '@/components/FullScreenButton';
 const API_HOST = "/api/local"
-    ;
 
 export default function ControllerApp() {
     const [masconValue, setMasconValue] = useState(0);
