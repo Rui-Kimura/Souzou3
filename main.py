@@ -157,19 +157,71 @@ class PathPlanner:
             grid.append([1 if c == '1' else 0 for c in padded])
         return np.array(grid)
 
-    def _create_cost_map(self):
-        cost_map = self.grid.copy()
-        rows, cols = cost_map.shape
-        obstacles = np.argwhere(self.grid == 1)
-        
-        for r, c in obstacles:
-            r_min = max(0, r - self.inflation_r)
-            r_max = min(rows, r + self.inflation_r + 1)
-            c_min = max(0, c - self.inflation_r)
-            c_max = min(cols, c + self.inflation_r + 1)
-            cost_map[r_min:r_max, c_min:c_max] = 1
+    def _create_cost_map(self, include_stocker=True):
+            """
+            コストマップ生成ロジック:
+            include_stocker=True の場合のみストッカー情報を反映する
+            """
+            rows, cols = self.grid.shape
+            temp_obstacle_map = self.grid.copy()
             
-        return cost_map
+            stocker_safe_indices = []
+
+            # ストッカー情報の反映（フラグがTrueの場合のみ）
+            if include_stocker and os.path.exists(STOCKER_FILE):
+                try:
+                    with open(STOCKER_FILE, 'r') as f:
+                        data = json.load(f)
+                        sx, sy, s_ang = data['x'], data['y'], data['angle']
+                        
+                        stocker_wall_indices = []
+                        
+                        # 1. 枠 & 2. 内部空間 の障害物化
+                        # 奥のバー
+                        for i in range(11): stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, -250 + i*50, -400))
+                        # 左アーム
+                        for i in range(4): stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, -250, -200 - i*50))
+                        # 右アーム
+                        for i in range(4): stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, 250, -200 - i*50))
+                        
+                        # 内部空間 (左)
+                        for x_off in range(-200, 0, 50): 
+                            for y_off in range(-350, -150, 50): 
+                                stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, x_off, y_off))
+                        # 内部空間 (右)
+                        for x_off in range(50, 250, 50): 
+                            for y_off in range(-350, -150, 50): 
+                                stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, x_off, y_off))
+
+                        for r, c in stocker_wall_indices:
+                            if 0 <= r < rows and 0 <= c < cols:
+                                temp_obstacle_map[r][c] = 1
+
+                        # 3. 安全地帯（中心ルート）の定義
+                        for y_off in range(-150, 150, 50):
+                            stocker_safe_indices.append(self._to_grid(sx, sy, s_ang, 0, y_off))
+
+                except Exception as e:
+                    print(f"Stocker load error: {e}")
+
+            # 4. 膨張処理 (Inflation)
+            cost_map = np.zeros_like(temp_obstacle_map)
+            obstacles = np.argwhere(temp_obstacle_map == 1)
+            
+            for r, c in obstacles:
+                r_min = max(0, r - self.inflation_r)
+                r_max = min(rows, r + self.inflation_r + 1)
+                c_min = max(0, c - self.inflation_r)
+                c_max = min(cols, c + self.inflation_r + 1)
+                cost_map[r_min:r_max, c_min:c_max] = 1
+                
+            # 5. 安全地帯のくり抜き (ストッカーがある場合のみ)
+            if include_stocker:
+                for r, c in stocker_safe_indices:
+                    if 0 <= r < rows and 0 <= c < cols:
+                        cost_map[r][c] = 0
+                    
+            return cost_map
 
     def get_path_astar(self, start_grid, goal_grid):
         start = tuple(start_grid)
