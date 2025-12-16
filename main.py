@@ -19,48 +19,35 @@ import threading
 import queue
 import asyncio
 
-# ==========================================
-# 1. 設定・定数
-# ==========================================
-
 SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
 MAP_DATA_PATH = "room.dat"
 PROFILE_FILE = "bno_profile.json"
 
-# --- マップ・グリッド設定 ---
-GRID_SIZE_MM = 50.0      # 1マスの大きさ (mm)
-ROBOT_WIDTH_MM = 400.0   # 筐体幅
-ROBOT_DEPTH_MM = 350.0   # 筐体奥行
-INFLATION_RADIUS = 6     # 障害物膨張半径
+GRID_SIZE_MM = 50.0      
+ROBOT_WIDTH_MM = 400.0   
+ROBOT_DEPTH_MM = 350.0   
+INFLATION_RADIUS = 6     
 
-# --- モーター制御設定 ---
 BASE_SPEED = 90.0
-KP_DIST = 1.5  # 直進補正ゲイン
-KP_TURN = 1.2  # 回転制御ゲイン
-TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
-DIST_THRESHOLD_MM = 40.0 # 目標点到達許容誤差
+KP_DIST = 1.5  
+KP_TURN = 1.2  
+TURN_THRESHOLD_DEG = 3.0 
+DIST_THRESHOLD_MM = 40.0 
 
-# --- ピン設定 ---
 L_EN = 19
-IN1 = 21 # LEFT_F
-IN2 = 20 # LEFT_B
+IN1 = 21 
+IN2 = 20 
 R_EN = 26
-IN3 = 16 # RIGHT_F
-IN4 = 12 # RIGHT_B
+IN3 = 16 
+IN4 = 12 
 FREQ = 100
 
-# --- リニアアクチュエータ ピン ---
 LINEAR_IN1 = 5
 LINEAR_IN2 = 6
 
-# --- センサー設定 ---
 SENSOR_HEIGHT_MM = 95.0
 PIXEL_TO_MM = 0.0017 * SENSOR_HEIGHT_MM
-
-# ==========================================
-# 2. グローバル変数・状態管理
-# ==========================================
 
 target_pose = (1000.0, 1000.0, 0.0)
 
@@ -78,9 +65,6 @@ planner = None
 robot = None
 position_lock = threading.Lock()
 
-# ==========================================
-# 3. クラス定義
-# ==========================================
 
 class Point(BaseModel):
     name: str
@@ -88,7 +72,6 @@ class Point(BaseModel):
     y: float
     angle: float
 
-# WebSocket接続管理クラス (追加)
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -110,7 +93,6 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-# --- ArduinoController (本番用) ---
 class ArduinoController:
     def __init__(self, baudrate=9600):
         self.ser = None
@@ -165,7 +147,6 @@ class RobotState:
         self.heading = start_heading
 
     def update(self, bno_heading, pmw_dx, pmw_dy):
-        """センサー値をもとに自己位置を更新"""
         if bno_heading is not None:
             self.heading = bno_heading
 
@@ -181,18 +162,15 @@ class RobotState:
         self.y -= dy_global
 
     def get_grid_pos(self):
-        """マップ操作用: 現在の物理座標をグリッド座標に変換して返す"""
         return int(self.x / GRID_SIZE_MM), int(self.y / GRID_SIZE_MM)
 
 
-# --- PathPlanner (機能強化版) ---
 class PathPlanner:
     def __init__(self, raw_map, inflation_r):
         self.grid = self._parse_map(raw_map)
         self.height = len(self.grid)
         self.width = len(self.grid[0])
         self.inflation_r = inflation_r
-        # 初期化時にストッカー情報を反映したコストマップを作成
         self.cost_map = self._create_cost_map(include_stocker=True)
 
     def _parse_map(self, raw_data):
@@ -200,21 +178,17 @@ class PathPlanner:
         grid = []
         for row_str in raw_data:
             padded = row_str + '1' * (max_len - len(row_str))
-            # 1:障害物, 0:通路
             grid.append([int(c) for c in padded])
         return np.array(grid)
 
     def _to_grid(self, cx, cy, angle, px, py):
-        """相対座標(px, py)を絶対グリッド座標(r, c)に変換"""
         rad = math.radians(angle)
         cos_v = math.cos(rad)
         sin_v = math.sin(rad)
         
-        # 回転
         tx = px * cos_v - py * sin_v
         ty = px * sin_v + py * cos_v
         
-        # 平行移動
         abs_x = cx + tx
         abs_y = cy + ty
         
@@ -228,7 +202,6 @@ class PathPlanner:
         
         stocker_safe_indices = []
 
-        # ストッカー情報の反映
         if include_stocker and os.path.exists(STOCKER_FILE):
             try:
                 with open(STOCKER_FILE, 'r') as f:
@@ -237,18 +210,13 @@ class PathPlanner:
                     
                     stocker_wall_indices = []
                     
-                    # 奥のバー
                     for i in range(11): stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, -250 + i*50, -400))
-                    # 左アーム
                     for i in range(4): stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, -250, -200 - i*50))
-                    # 右アーム
                     for i in range(4): stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, 250, -200 - i*50))
                     
-                    # 内部空間 (左)
                     for x_off in range(-200, 0, 50): 
                         for y_off in range(-350, -150, 50): 
                              stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, x_off, y_off))
-                    # 内部空間 (右)
                     for x_off in range(50, 250, 50): 
                         for y_off in range(-350, -150, 50): 
                              stocker_wall_indices.append(self._to_grid(sx, sy, s_ang, x_off, y_off))
@@ -257,14 +225,12 @@ class PathPlanner:
                         if 0 <= r < rows and 0 <= c < cols:
                             temp_obstacle_map[r][c] = 1
 
-                    # 安全地帯（中心ルート）
                     for y_off in range(-150, 150, 50):
                         stocker_safe_indices.append(self._to_grid(sx, sy, s_ang, 0, y_off))
 
             except Exception as e:
                 print(f"Stocker load error: {e}")
 
-        # 膨張処理
         cost_map = np.zeros_like(temp_obstacle_map)
         obstacles = np.argwhere(temp_obstacle_map == 1)
         
@@ -275,7 +241,6 @@ class PathPlanner:
             c_max = min(cols, c + self.inflation_r + 1)
             cost_map[r_min:r_max, c_min:c_max] = 1
             
-        # 安全地帯のくり抜き
         if include_stocker:
             for r, c in stocker_safe_indices:
                 if 0 <= r < rows and 0 <= c < cols:
@@ -284,7 +249,6 @@ class PathPlanner:
         return cost_map
 
     def update_cost_map(self):
-        """ストッカーファイル変更時などに再生成する"""
         self.cost_map = self._create_cost_map(include_stocker=True)
 
     def get_path_astar(self, start_grid, goal_grid):
@@ -298,12 +262,10 @@ class PathPlanner:
              print(f"エラー: ゴール地点 {goal} がマップ範囲外です")
              return None
 
-        # ゴールが障害物内なら到達不能
         if self.cost_map[goal[1]][goal[0]] == 1:
             print("エラー: ゴール地点が障害物内または到達不能エリアです")
             return None
 
-        # スタート地点が障害物内の場合のリカバリ（近くの空きマスを探す）
         if self.cost_map[start[1]][start[0]] == 1:
             print("警告: スタート地点が障害物内です。近傍を探索します。")
             found = False
@@ -361,7 +323,6 @@ class PathPlanner:
         return path
 
 
-# PWMインスタンス
 p1, p2, p3, p4 = None, None, None, None
 
 def setup_hardware():
@@ -389,10 +350,8 @@ def set_motor_speed(left_speed, right_speed, rotate=False, brake=False,):
     l = max(-100, min(100, left_speed))
     r = max(-100, min(100, right_speed))
     
-    # 左
     if l > 0: p1.ChangeDutyCycle(l); p2.ChangeDutyCycle(0)
     else: p1.ChangeDutyCycle(0); p2.ChangeDutyCycle(abs(l))
-    # 右
     if r > 0: p3.ChangeDutyCycle(r); p4.ChangeDutyCycle(0)
     else: p3.ChangeDutyCycle(0); p4.ChangeDutyCycle(abs(r))
 
@@ -474,8 +433,6 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
                 time.sleep(0.05)
                 continue
             
-            # print(f"Tgt:{target_deg:.0f} Cur:{ch:.0f} Diff:{diff:.0f} Dist:{dist:.0f} Mode:{'TURN' if state_turning else 'GO'}")
-
             if state_turning:
                 if abs(diff) < 10.0:
                     state_turning = False
@@ -488,7 +445,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
                     else: turn_pow = min(turn_pow, -min_p)
                     set_motor_speed(-turn_pow, turn_pow)
 
-            else: # 直進モード
+            else: 
                 if abs(diff) > 30.0:
                     state_turning = True
                     set_motor_speed(0, 0)
@@ -505,27 +462,21 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     return True
 
 def move_linear(status):
-    if(status==1):  #上昇
+    if(status==1):  
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.HIGH)
-    elif(status==-1): #下降
+    elif(status==-1): 
         GPIO.output(LINEAR_IN1, GPIO.HIGH)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
-    else: #STOP
+    else: 
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
-
-
-# ==========================================
-# 4. API定義
-# ==========================================
 
 app = FastAPI()
 
 robot = None
 arduino = ArduinoController()
 
-# --- 非同期ブロードキャストタスク ---
 async def broadcast_position_task():
     while True:
         await asyncio.sleep(0.05) 
@@ -537,12 +488,10 @@ async def broadcast_position_task():
                     "y": robot.y,
                     "angle": robot.heading
                 }
-                # JSONシリアライズして送信
                 await manager.broadcast(json.dumps(data))
 
 @app.on_event("startup")
 async def startup_event():
-    # FastAPI起動時にブロードキャストタスクをバックグラウンドで開始
     asyncio.create_task(broadcast_position_task())
 
 @app.middleware("http")
@@ -556,8 +505,42 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # クライアントからのメッセージを受信（必要であれば処理）
-            await websocket.receive_text()
+            data_text = await websocket.receive_text()
+            message = json.loads(data_text)
+            msg_type = message.get("type")
+
+            if msg_type == "control":
+                global manual_direction, manual_speed, manual_angle, manual_rotate
+                manual_direction = message["direction"]
+                manual_speed = message["speed"] / 5.0
+                manual_angle = message["angle"]
+                manual_rotate = message["rotate"]
+                print(f"受信データ: direction={manual_direction}, speed={manual_speed}, angle={manual_angle}, rotate={manual_rotate}")
+            
+            elif msg_type == "manual_mode":
+                global manual_control
+                manual_control = bool(message["mode"])
+
+            elif msg_type == "linear":
+                global manual_linear
+                mode = message["mode"]
+                if mode == "up":
+                    manual_linear = 1
+                elif mode == "down":
+                    manual_linear = -1
+                else:
+                    manual_linear = 0
+
+            elif msg_type == "slide":
+                mode = message["mode"]
+                print(f"Slide Command Received: {mode}")
+                if mode == "open":
+                    arduino.send_command('o')
+                elif mode == "close":
+                    arduino.send_command('c')
+                else:
+                    print(f"Unknown slide mode: {mode}")
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
@@ -583,10 +566,6 @@ async def mapdata():
 
 @app.get("/costmapdata")
 async def costmapdata(mode: str = "normal"):
-    """
-    mode="base" の場合はストッカーを除外したマップを返す（編集用）
-    それ以外は経路計画用のキャッシュされたマップを返す
-    """
     if planner:
         target_map = None
         if mode == "base":
@@ -610,7 +589,6 @@ async def target_points():
              return []
     return []
 
-# 既存の /saved は廃止し、/add_target_point に統一
 @app.post("/add_target_point")
 def save_points(point: Point):
     data = point.dict()
@@ -689,8 +667,6 @@ def get_stocker():
             return {"message": "error reading stocker"}
     return {"message": "no stocker set"}
 
-# 物理動作制御用API
-
 @app.get("/automove_start")
 async def automove_start():
     move_queue.put(AUTOMOVE)
@@ -730,7 +706,7 @@ def linear_move_api(mode:str):
         manual_linear = 1
     elif(mode=="down"):
         manual_linear = -1
-    else: #STOP
+    else: 
         manual_linear = 0
     return{
         "linear": manual_linear
@@ -785,7 +761,6 @@ def main():
         global robot
         robot = RobotState(start_x_mm, start_y_mm, start_heading)
 
-        # マップデータ読み込み
         raw_map_data = []
         if os.path.exists(MAP_DATA_PATH):
             with open(MAP_DATA_PATH, "r") as f:
@@ -796,22 +771,18 @@ def main():
         global planner
         planner = PathPlanner(raw_map_data, inflation_r=INFLATION_RADIUS)
         
-        # --- 位置監視用スレッドの開始 ---
         monitor_thread = threading.Thread(target=monitor_position, args=(robot, bno, pmw), daemon=True)
         monitor_thread.start()
         print("位置監視システムを開始しました。")
 
         def run_api():
-            # FastAPIをスレッドで動かす
             uvicorn.run(app, host="0.0.0.0", port=8100, log_level="info")
         
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
         
-        # --- メイン制御ループ ---
         while True:
             EB = False
-            # 手動コントロール用
             while(manual_control):
                 if(manual_direction != 0 and not manual_rotate):
                     if(manual_speed < 0):
@@ -820,13 +791,13 @@ def main():
                         EB = True
                     elif(manual_direction == 1 or manual_direction == -1):
                         EB = False
-                        if(manual_angle > 0): #右曲がり
+                        if(manual_angle > 0): 
                             manual_left = manual_direction * manual_speed * (100 - manual_angle)
                             manual_right = manual_direction * manual_speed * 100
-                        elif(manual_angle <= 0): #左曲がり
+                        elif(manual_angle <= 0): 
                             manual_left = manual_direction * manual_speed * 100
                             manual_right = manual_direction * manual_speed * (100 + manual_angle)
-                elif(manual_direction != 0 and manual_rotate): #超信地旋回
+                elif(manual_direction != 0 and manual_rotate): 
                     EB = False
                     manual_right = manual_direction * manual_speed * manual_angle
                     manual_left = -1 * manual_right

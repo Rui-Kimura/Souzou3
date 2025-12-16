@@ -6,7 +6,6 @@ import Fab from '@mui/material/Fab';
 import { PanelContainer, MasconHandle, ReverserHandle, SemicircleMascon, MechanicalSwitch } from './style';
 import { Typography, IconButton, Tooltip } from '@mui/material';
 import FullscreenButton from '@/components/FullScreenButton';
-const API_HOST = "/api/local"
 
 export default function ControllerApp() {
     const [masconValue, setMasconValue] = useState(0);
@@ -14,6 +13,8 @@ export default function ControllerApp() {
     const [angleValue, setAngleValue] = useState(0);
     const [manualMode, setManualMode] = useState(false);
     const [rotateValue, setRotateMode] = useState(false);
+    const ws = useRef<WebSocket | null>(null);
+
     const handleChange = (event: any) => {
         setManualMode(event.target.checked);
     };
@@ -23,6 +24,12 @@ export default function ControllerApp() {
     const [scale, setScale] = useState(1);
 
     useEffect(() => {
+        ws.current = new WebSocket("/api/local/ws");
+        
+        ws.current.onopen = () => {
+            console.log("WebSocket Connected");
+        };
+
         const handleResize = () => {
             const h = window.innerHeight;
             const threshold = 450;
@@ -32,32 +39,37 @@ export default function ControllerApp() {
 
         handleResize();
         window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
-    }, []);
-
-    /* 操作データ送信 */
-    useEffect(() => {
-        const sendControlData = async () => {
-            try {
-                await fetch(API_HOST + `/controll_api?direction=${reverserValue}&speed=${masconValue * -1}&angle=${angleValue}&rotate=${rotateValue}`, {
-                    method: 'GET'
-                });
-            } catch (error) {
-                console.error('Failed to send control data:', error);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            if(ws.current){
+                ws.current.close();
             }
         };
-        if (manualMode)
-            sendControlData();
-    }, [masconValue, reverserValue, angleValue, rotateValue]);
+    }, []);
 
     useEffect(() => {
-        const set_manual_mode = async (mode: boolean) => {
-            try {
-                await fetch(API_HOST + `/set_manual_mode?mode=${mode ? true : false}`, {
-                    method: 'GET'
-                });
-            } catch (error) {
-                console.error('Failed to set manual mode:', error);
+        const sendControlData = () => {
+            if (ws.current && ws.current.readyState === WebSocket.OPEN && manualMode) {
+                const data = {
+                    type: "control",
+                    direction: reverserValue,
+                    speed: masconValue * -1,
+                    angle: angleValue,
+                    rotate: rotateValue
+                };
+                ws.current.send(JSON.stringify(data));
+            }
+        };
+        sendControlData();
+    }, [masconValue, reverserValue, angleValue, rotateValue, manualMode]);
+
+    useEffect(() => {
+        const set_manual_mode = (mode: boolean) => {
+            if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                ws.current.send(JSON.stringify({
+                    type: "manual_mode",
+                    mode: mode
+                }));
             }
         };
         set_manual_mode(manualMode);
@@ -74,84 +86,65 @@ export default function ControllerApp() {
     const handleReverserChange = (event: any, newValue: number | number[]) => {
         setReverserValue(Array.isArray(newValue) ? newValue[0] : newValue);
     };
-    const upLinear = async () => {
-        if (manualMode) {
-            try {
-                await fetch(API_HOST + `/linear?mode=up`, {
-                    method: 'GET'
-                });
-            } catch (error) {
-                console.error('Failed to set manual mode:', error);
-            }
+    const upLinear = () => {
+        if (manualMode && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "linear",
+                mode: "up"
+            }));
         }
     };
 
-    const downLinear = async () => {
-        if (manualMode) {
-            try {
-                await fetch(API_HOST + `/linear?mode=down`, {
-                    method: 'GET'
-                });
-            } catch (error) {
-                console.error('Failed to set manual mode:', error);
-            }
+    const downLinear = () => {
+        if (manualMode && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "linear",
+                mode: "down"
+            }));
         }
     };
 
-    const stopLinear = async () => {
-        if (manualMode) {
-            try {
-                await fetch(API_HOST + `/linear?mode=stop`, {
-                    method: 'GET'
-                });
-            } catch (error) {
-                console.error('Failed to set manual mode:', error);
-            }
+    const stopLinear = () => {
+        if (manualMode && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "linear",
+                mode: "stop"
+            }));
         }
     };
 
-    const openSlide = async () => {
-        if (manualMode) {
-            try {
-                await fetch(API_HOST + `/slide?mode=open`, {
-                    method: 'GET'
-                });
-            } catch (error) {
-                console.error('Failed to set manual mode:', error);
-            }
+    const openSlide = () => {
+        if (manualMode && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "slide",
+                mode: "open"
+            }));
         }
     }
 
-    const closeSlide = async () => {
-        if (manualMode) {
-            try {
-                await fetch(API_HOST + `/slide?mode=close`, {
-                    method: 'GET'
-                });
-            }
-            catch (error) {
-                console.error('Failed to set manual mode:', error);
-            }
+    const closeSlide = () => {
+        if (manualMode && ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "slide",
+                mode: "close"
+            }));
         }
     }
 
-    /*操作画面を閉じるときは停止し制御を切る*/
-    const handleBeforeUnload = async () => {
+    const handleBeforeUnload = () => {
         setManualMode(false);
-        try {
-            await fetch(API_HOST + `/set_manual_mode?mode=false`, {
-                method: 'GET'
-            });
-        } catch (error) {
-            console.error('Failed to set manual mode:', error);
-        }
-
-        try {
-            await fetch(API_HOST + `/controll_api?direction=0&speed=0&angle=0`, {
-                method: 'GET'
-            });
-        } catch (error) {
-            console.error('Failed to send control data:', error);
+        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+                type: "manual_mode",
+                mode: false
+            }));
+            ws.current.send(JSON.stringify({
+                type: "control",
+                direction: 0,
+                speed: 0,
+                angle: 0,
+                rotate: false
+            }));
         }
     }
 
@@ -196,8 +189,8 @@ export default function ControllerApp() {
                                 sx={{ marginTop: 2 }}
                             />
                         </PanelContainer>
-                        <Box sx={{ display: "flex", flexDirection: "column" }}>
-                            <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "25%" }}>
+                        <Box sx={{ display: "flex", flexDirection: "column", ml:2}}>
+                            <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "auto" }}>
                                 <Fab
                                     aria-label="add"
                                     sx={{
@@ -237,7 +230,7 @@ export default function ControllerApp() {
                                     下
                                 </Fab>
                             </PanelContainer>
-                            <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "25%" }}>
+                            <PanelContainer sx={{ display: "flex", justifyContent: "space-around", flexDirection: "column", width: "auto"}}>
                                 <Fab
                                     aria-label="add"
                                     sx={{
