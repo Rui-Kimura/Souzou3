@@ -15,6 +15,8 @@ import {
   DialogContent,
   TextField,
   DialogActions,
+  Snackbar,
+  Grid, // 追加: レイアウト調整用
 } from "@mui/material";
 
 interface Point {
@@ -30,6 +32,7 @@ export default function Map() {
 
   const [mapdata, setMapdata] = useState<string[]>([]);
   const [costmapData, setCostmapData] = useState<string[]>([]);
+  const [savedPoints, setSavedPoints] = useState<Point[]>([]);
   
   const [position_x, setPositionX] = useState<number>(0);
   const [position_y, setPositionY] = useState<number>(0);
@@ -39,11 +42,20 @@ export default function Map() {
   const [target_y, setTargetY] = useState<number>(0);
   const [target_angle, setTargetAngle] = useState<number>(0);
 
-  // --- 追加: タップ操作とダイアログ用State ---
+  // ポップオーバー・ダイアログ制御用
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const [selectedGrid, setSelectedGrid] = useState<{r: number, c: number} | null>(null);
+  const [selectedSavedPoint, setSelectedSavedPoint] = useState<Point | null>(null);
+  
   const [isNameDialogOpen, setNameDialogOpen] = useState(false);
   const [pointName, setPointName] = useState("");
+  // --- 追加: 角度入力用State ---
+  const [pointAngle, setPointAngle] = useState<string | number>(0);
+
+  // 警告表示用State
+  const [warningOpen, setWarningOpen] = useState(false);
+
+  // --- データ取得系 ---
 
   const fetch_mapdata = async () => {
     try {
@@ -62,6 +74,17 @@ export default function Map() {
       setCostmapData(data.costmapdata || []);
     } catch (error) {
       console.error("Failed to fetch costmap data:", error);
+    }
+  };
+
+  const fetch_saved_points = async () => {
+    try {
+      const res = await fetch("/api/local/saved_target_points");
+      const data = await res.json();
+      const pointsList = Array.isArray(data) ? data : (data.points || []);
+      setSavedPoints(pointsList);
+    } catch (error) {
+      console.error("Failed to fetch saved points:", error);
     }
   };
 
@@ -92,80 +115,169 @@ export default function Map() {
   const interval_function = async () => {
     await fetch_position();
     await fetch_target_point();
+    await fetch_saved_points(); 
   };
 
   useEffect(() => {
     fetch_mapdata();
     fetch_costmapdata();
-    const intervalId = setInterval(interval_function, 200);
+    fetch_saved_points();
+    const intervalId = setInterval(interval_function, 500);
     return () => clearInterval(intervalId);
   }, []);
 
-  // --- 追加: タイルクリック時の処理 ---
-  const handleTileClick = (event: React.MouseEvent<HTMLElement>, rowIndex: number, colIndex: number, isWall: boolean, isCost: boolean) => {
-    // 壁やコスト領域なら何もしない
-    if (isWall || isCost) {
-      return;
-    }
-    // ポップオーバーを表示
-    setAnchorEl(event.currentTarget);
-    setSelectedGrid({ r: rowIndex, c: colIndex });
+  // --- ロジック系 ---
+
+  const findPointAtGrid = (r: number, c: number) => {
+    return savedPoints.find(p => {
+      const pr = Math.floor(p.y / TILE_WIDTH);
+      const pc = Math.floor(p.x / TILE_WIDTH);
+      return pr === r && pc === c;
+    });
   };
 
-  // --- 追加: ポップオーバーを閉じる ---
+  const handleTileClick = (event: React.MouseEvent<HTMLElement>, rowIndex: number, colIndex: number, isWall: boolean, isCost: boolean) => {
+    if (isWall) return;
+
+    // コスト領域チェック
+    if (isCost) {
+      setWarningOpen(true);
+      return;
+    }
+
+    const existingPoint = findPointAtGrid(rowIndex, colIndex);
+
+    setAnchorEl(event.currentTarget);
+    setSelectedGrid({ r: rowIndex, c: colIndex });
+    
+    if (existingPoint) {
+      setSelectedSavedPoint(existingPoint);
+      setPointName(existingPoint.name);
+      // 既存ポイントの角度をセット
+      setPointAngle(existingPoint.angle); 
+    } else {
+      setSelectedSavedPoint(null);
+      setPointName("");
+      // 新規の場合は0（または現在のロボットの向きなど）をセット
+      setPointAngle(0);
+    }
+  };
+
   const handlePopoverClose = () => {
     setAnchorEl(null);
     setSelectedGrid(null);
+    setSelectedSavedPoint(null);
   };
 
-  // --- 追加: 「目標地点の追加」ボタンクリック ---
-  const handleAddButtonClick = () => {
-    setAnchorEl(null); // ポップオーバーを閉じる
-    setPointName("");  // 名前入力をリセット
-    setNameDialogOpen(true); // ダイアログを開く
+  const handleOpenDialog = () => {
+    setAnchorEl(null);
+    setNameDialogOpen(true);
   };
 
-  // --- 追加: 保存処理 ---
+  // --- 追加: 即座にその場所へ移動する機能 ---
+  const handleMoveHere = async () => {
+    if (!selectedGrid) return;
+
+    // タイルの中心座標を計算
+    const physicalX = selectedGrid.c * TILE_WIDTH + TILE_WIDTH / 2.0;
+    const physicalY = selectedGrid.r * TILE_WIDTH + TILE_WIDTH / 2.0;
+    
+    // 移動時の角度は登録ポイントがあればその角度、なければ0度とする（必要に応じて変更可）
+    const angle = selectedSavedPoint ? selectedSavedPoint.angle : 0;
+
+    const Point = {
+      name:"",
+      x: physicalX,
+      y: physicalY,
+      angle: angle
+    };
+
+    try {
+      // ターゲット更新用のAPIエンドポイントへPOST (パスは環境に合わせて調整してください)
+      const res = await fetch("/api/local/set_target_point", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(Point),
+      });
+
+      if (res.ok) {
+        console.log("Target updated to click position");
+        fetch_target_point(); // 反映のために即時取得
+      } else {
+        console.error("Failed to update target");
+      }
+    } catch (error) {
+      console.error("Error moving to point:", error);
+    }
+
+    handlePopoverClose();
+  };
+
   const handleSavePoint = async () => {
     if (!selectedGrid) return;
 
-    // グリッド座標から物理座標(mm)へ変換
-    // マスの中心座標にするため + TILE_WIDTH / 2 (25mm) を加算
+    // 名前変更の場合、古い名前のエントリを削除してから追加（上書き処理）
+    if (selectedSavedPoint && selectedSavedPoint.name !== pointName) {
+        await handleDeleteRequest(selectedSavedPoint.name);
+    }
+
     const physicalX = selectedGrid.c * TILE_WIDTH + TILE_WIDTH / 2.0;
     const physicalY = selectedGrid.r * TILE_WIDTH + TILE_WIDTH / 2.0;
+    
+    // 入力された角度を使用
+    const angle = Number(pointAngle);
 
     const payload: Point = {
-      name: pointName || Date.now().toString(), // 空ならデフォルト名
+      name: pointName || "No Name",
       x: physicalX,
       y: physicalY,
-      angle: 0.0, // タップ指定なので角度は一旦0度とします
+      angle: angle,
     };
 
     try {
       const res = await fetch("/api/local/add_target_point", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-
+      
       if (res.ok) {
-        console.log("Saved successfully");
+        console.log("Point saved");
+        fetch_saved_points(); 
       } else {
         console.error("Failed to save point");
       }
     } catch (error) {
-      console.error("Error saving point:", error);
+      console.error("Error saving:", error);
     }
 
-    setNameDialogOpen(false); // ダイアログを閉じる
-    setSelectedGrid(null);
+    setNameDialogOpen(false);
+    handlePopoverClose();
   };
 
+  const handleDeleteRequest = async (name: string) => {
+      try {
+        const res = await fetch(`/api/local/delete_target_point?name=${encodeURIComponent(name)}`);
+        if (res.ok) {
+            console.log("Deleted:", name);
+        }
+      } catch (error) {
+          console.error("Delete failed:", error);
+      }
+  };
+
+  const handleDeletePoint = async () => {
+      if (selectedSavedPoint) {
+          await handleDeleteRequest(selectedSavedPoint.name);
+          await fetch_saved_points();
+          setNameDialogOpen(false);
+          handlePopoverClose();
+      }
+  };
+
+  // --- 描画用計算 ---
   const playerPixelX = (position_x / TILE_WIDTH) * TILE_SIZE;
   const playerPixelY = (position_y / TILE_WIDTH) * TILE_SIZE;
-
   const targetPixelX = (target_x / TILE_WIDTH) * TILE_SIZE;
   const targetPixelY = (target_y / TILE_WIDTH) * TILE_SIZE;
 
@@ -198,7 +310,7 @@ export default function Map() {
               flexDirection: "column",
             }}
           >
-           {/* プレイヤーアイコン (赤) */}
+            {/* プレイヤーアイコン */}
             <Box
               sx={{
                 position: "absolute",
@@ -206,19 +318,17 @@ export default function Map() {
                 height: iconHeight,
                 bgcolor: "#e74c3c",
                 clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
-                
                 left: playerPixelX,
                 top: playerPixelY,
-                
                 transform: `translate(-50%, -50%) rotate(${position_angle}deg)`,
                 transformOrigin: "center center", 
-                zIndex: 10,
+                zIndex: 20,
                 transition: "all 0.3s ease-out",
-                pointerEvents: "none", // アイコンがクリックを邪魔しないように
+                pointerEvents: "none",
               }}
             />
 
-            {/* ターゲットアイコン (青) */}
+            {/* ターゲットアイコン */}
             <Box
               sx={{
                 position: "absolute",
@@ -226,13 +336,11 @@ export default function Map() {
                 height: iconHeight,
                 bgcolor: "#4400ffff",
                 clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
-                
                 left: targetPixelX, 
                 top: targetPixelY,
-                
                 transform: `translate(-50%, -50%) rotate(${target_angle}deg)`,
                 transformOrigin: "center center",
-                zIndex: 10,
+                zIndex: 20,
                 pointerEvents: "none",
               }}
             />
@@ -243,31 +351,47 @@ export default function Map() {
                 {rowString.split("").map((cellChar, colIndex) => {
                   const isCost = costmapData[rowIndex]?.[colIndex] === "1";
                   const isWall = cellChar === "1";
+                  const savedPoint = findPointAtGrid(rowIndex, colIndex);
                   
                   return (
                     <Box
                       key={`${rowIndex}-${colIndex}`}
-                      // --- 追加: クリックイベント ---
                       onClick={(e) => handleTileClick(e, rowIndex, colIndex, isWall, isCost)}
                       sx={{
                         width: TILE_SIZE,
                         height: TILE_SIZE,
                         boxSizing: "border-box",
-                        bgcolor: isWall ? "#2c3e50" : "#ecf0f1",
-                        border:
-                          cellChar === "0"
-                            ? "1px solid #bdc3c7"
-                            : "1px solid #34495e",
-                        backgroundImage: isCost 
+                        position: "relative",
+                        bgcolor: isWall 
+                            ? "#2c3e50" 
+                            : savedPoint 
+                                ? "#3498db" 
+                                : "#ecf0f1",
+                        border: cellChar === "0" ? "1px solid #bdc3c7" : "1px solid #34495e",
+                        backgroundImage: (!isWall && !savedPoint && isCost)
                           ? "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.15) 0, rgba(255, 0, 0, 0.15) 2px, transparent 2px, transparent 6px)" 
                           : "none",
-                        // --- 追加: クリック可能な場所はカーソルを変える ---
-                        cursor: (!isWall && !isCost) ? "pointer" : "default",
-                        "&:hover": (!isWall && !isCost) ? {
-                          bgcolor: "#d6eaf8" // ホバー時のハイライト
-                        } : {}
+                        cursor: (!isWall && !isCost) ? "pointer" : (isCost ? "not-allowed" : "default"),
+                        "&:hover": (!isWall && !isCost) ? { bgcolor: "#d6eaf8" } : {}
                       }}
-                    />
+                    >
+                        {/* 保存されたポイントの矢印 */}
+                        {savedPoint && (
+                            <Box
+                                sx={{
+                                    position: "absolute",
+                                    top: "50%",
+                                    left: "50%",
+                                    width: "60%",
+                                    height: "60%",
+                                    bgcolor: "white",
+                                    clipPath: "polygon(50% 0%, 0% 100%, 50% 80%, 100% 100%)",
+                                    transform: `translate(-50%, -50%) rotate(${savedPoint.angle}deg)`,
+                                    transformOrigin: "center center",
+                                }}
+                            />
+                        )}
+                    </Box>
                   );
                 })}
               </Box>
@@ -275,52 +399,102 @@ export default function Map() {
           </Box>
         </Card>
 
-        {/* --- 追加: ポップオーバー (目標地点の追加ボタン) --- */}
+        {/* --- ポップオーバー --- */}
         <Popover
           open={openPopover}
           anchorEl={anchorEl}
           onClose={handlePopoverClose}
-          anchorOrigin={{
-            vertical: 'bottom',
-            horizontal: 'center',
-          }}
-          transformOrigin={{
-            vertical: 'top',
-            horizontal: 'center',
-          }}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'center' }}
         >
-          <Box sx={{ p: 1 }}>
-            <Button size="small" variant="contained" onClick={handleAddButtonClick}>
-              目標地点の追加
+          <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1, minWidth: 160 }}>
+            {selectedSavedPoint ? (
+                <>
+                    <Typography variant="subtitle2" align="center" sx={{ fontWeight: 'bold' }}>
+                        {selectedSavedPoint.name}
+                    </Typography>
+                    <Typography variant="caption" align="center" color="text.secondary">
+                        {selectedSavedPoint.angle}°
+                    </Typography>
+                    <Button size="small" variant="contained" onClick={handleOpenDialog}>
+                        編集
+                    </Button>
+                </>
+            ) : (
+                <Button size="small" variant="outlined" onClick={handleOpenDialog}>
+                    地点として登録
+                </Button>
+            )}
+            
+            {/* --- 追加: ここに移動するボタン --- */}
+            <Button size="small" variant="contained" color="secondary" onClick={handleMoveHere}>
+                ここに移動する
             </Button>
           </Box>
         </Popover>
 
-        {/* --- 追加: 名前入力ダイアログ --- */}
+        {/* --- 名前・角度入力ダイアログ --- */}
         <Dialog open={isNameDialogOpen} onClose={() => setNameDialogOpen(false)}>
-          <DialogTitle>地点名の入力</DialogTitle>
+          <DialogTitle>
+              {selectedSavedPoint ? "ポイントの編集" : "目標地点の追加"}
+          </DialogTitle>
           <DialogContent>
-            <TextField
-              autoFocus
-              margin="dense"
-              label="地点名"
-              type="text"
-              fullWidth
-              variant="standard"
-              value={pointName}
-              onChange={(e) => setPointName(e.target.value)}
-            />
+            <Grid container spacing={2} sx={{ mt: 0.5 }}>
+                <Grid item xs={8}>
+                    <TextField
+                    autoFocus
+                    margin="dense"
+                    label="地点名"
+                    type="text"
+                    fullWidth
+                    variant="standard"
+                    value={pointName}
+                    onChange={(e) => setPointName(e.target.value)}
+                    />
+                </Grid>
+                <Grid item xs={4}>
+                    {/* --- 追加: 角度入力フォーム --- */}
+                    <TextField
+                    margin="dense"
+                    label="角度 (deg)"
+                    type="number"
+                    fullWidth
+                    variant="standard"
+                    value={pointAngle}
+                    onChange={(e) => setPointAngle(e.target.value)}
+                    />
+                </Grid>
+            </Grid>
           </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setNameDialogOpen(false)}>キャンセル</Button>
-            <Button onClick={handleSavePoint} variant="contained">保存</Button>
+          <DialogActions sx={{ justifyContent: 'space-between', px: 2, pb: 2 }}>
+            {selectedSavedPoint ? (
+                <Button onClick={handleDeletePoint} color="error">
+                    削除
+                </Button>
+            ) : (
+                <Box />
+            )}
+            <Box>
+                <Button onClick={() => setNameDialogOpen(false)} sx={{ mr: 1 }}>
+                    キャンセル
+                </Button>
+                <Button onClick={handleSavePoint} variant="contained">
+                    保存
+                </Button>
+            </Box>
           </DialogActions>
         </Dialog>
 
-        <Paper
-          variant="outlined"
-          sx={{ mt: 2, p: 1, px: 2, bgcolor: 'rgba(255,255,255,0.6)', borderColor: 'transparent' }}
-        >
+        {/* 警告用 Snackbar */}
+        <Snackbar
+          open={warningOpen}
+          autoHideDuration={1000}
+          onClose={() => setWarningOpen(false)}
+          message="周囲の構造物と干渉する恐れがあるため目標地点を設定できません。"
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        />
+
+        <Paper variant="outlined" sx={{ mt: 2, p: 1, px: 2, bgcolor: 'rgba(255,255,255,0.6)', borderColor: 'transparent' }}>
           <Typography variant="body2" color="text.secondary">
             現在位置: <strong>X={position_x.toFixed(0)}</strong>, <strong>Y={position_y.toFixed(0)}</strong>, 角度={position_angle.toFixed(0)}°
           </Typography>
@@ -328,63 +502,20 @@ export default function Map() {
 
         <Stack direction="row" spacing={3} sx={{ mt: 3 }}>
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Box
-              sx={{
-                width: 16,
-                height: 16,
-                bgcolor: "#2c3e50",
-                borderRadius: 0.5,
-              }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              壁 (1)
-            </Typography>
+            <Box sx={{ width: 16, height: 16, bgcolor: "#2c3e50", borderRadius: 0.5 }} />
+            <Typography variant="caption" color="text.secondary">壁</Typography>
           </Stack>
-
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Box
-              sx={{
-                width: 16,
-                height: 16,
-                bgcolor: "#ecf0f1",
-                border: "1px solid #bdc3c7",
-                borderRadius: 0.5,
-              }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              通路 (0)
-            </Typography>
+            <Box sx={{ width: 16, height: 16, bgcolor: "#3498db", borderRadius: 0.5 }} />
+            <Typography variant="caption" color="text.secondary">登録地点</Typography>
           </Stack>
-
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Box
-              sx={{
-                width: 16,
-                height: 16,
-                bgcolor: "#ecf0f1",
-                border: "1px solid #bdc3c7",
-                borderRadius: 0.5,
-                backgroundImage: "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.25) 0, rgba(255, 0, 0, 0.25) 2px, transparent 2px, transparent 6px)"
-              }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              コスト領域
-            </Typography>
+            <Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5 }} />
+            <Typography variant="caption" color="text.secondary">通路</Typography>
           </Stack>
-
           <Stack direction="row" alignItems="center" spacing={1}>
-            <Box
-              sx={{
-                width: 0,
-                height: 0,
-                borderLeft: "4px solid transparent",
-                borderRight: "4px solid transparent",
-                borderBottom: `${(TILE_SIZE / 3) * 1.5}px solid #e74c3c`,
-              }}
-            />
-            <Typography variant="caption" color="text.secondary">
-              現在位置
-            </Typography>
+            <Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5, backgroundImage: "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.25) 0, rgba(255, 0, 0, 0.25) 2px, transparent 2px, transparent 6px)" }} />
+            <Typography variant="caption" color="text.secondary">コスト領域</Typography>
           </Stack>
         </Stack>
       </Container>
