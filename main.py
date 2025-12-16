@@ -1,87 +1,72 @@
-import RPi.GPIO as GPIO
-import time
-import board
-import adafruit_bno055
-import numpy as np
-import heapq
-import math
-import os
-import json
-from pmw3901 import PMW3901
-import serial
-import serial.tools.list_ports
-
 from fastapi import FastAPI, Request
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import uvicorn
 import threading
-import queue
+import time
+import math
+import numpy as np
+import heapq
+import random
+import serial
+import serial.tools.list_ports
+import json
+import os
 
-SAVED_POINTS_FILE = "saved_points.dat"
+# ==========================================
+# 1. 設定・定数
+# ==========================================
 
-# --- マップ・グリッド設定 ---
-GRID_SIZE_MM = 50.0      # 1マスの大きさ (mm)
-ROBOT_WIDTH_MM = 400.0   # 筐体幅
-ROBOT_DEPTH_MM = 350.0   # 筐体奥行
-# 障害物膨張半径 (ロボットの半径 / グリッドサイズ) 
-INFLATION_RADIUS = 6      
+SAVED_POINTS_FILE = "../saved_points.dat"
+MAP_DATA_PATH = "../room.dat"
+PROFILE_FILE = "../bno_profile.json"
 
-# --- モーター制御設定 ---
-BASE_SPEED = 90.0
-KP_DIST = 1.5  # 直進補正ゲイン
-KP_TURN = 1.2  # 回転制御ゲイン
-TURN_THRESHOLD_DEG = 3.0 # 回転停止許容誤差
-DIST_THRESHOLD_MM = 40.0 # 目標点到達許容誤差
+# グリッド・マップ設定
+GRID_SIZE_MM = 50.0       # 1マスの大きさ (mm)
+INFLATION_RADIUS = 5      # 障害物膨張半径 (グリッド数)
 
-# --- ピン設定 ---
-L_EN = 19
-IN1 = 21 # LEFT_F
-IN2 = 20 # LEFT_B
-R_EN = 26
-IN3 = 16 # RIGHT_F
-IN4 = 12 # RIGHT_B
-FREQ = 100
+# 動作パラメータ (シミュレーション用)
+SPEED = 15.0            # 直進速度 (mm/step)
+TURN_RATE_PIVOT = 15.0  # その場旋回時の回転速度 (度/step)
+TURN_RATE_MOVE = 5.0    # 走行中の操舵速度 (度/step)
+ANGLE_THRESHOLD = 20.0  # 「その場旋回」から「前進」に切り替える角度差の閾値
+UPDATE_INTERVAL = 0.05  # ループ更新間隔 (秒)
 
-# --- リニアアクチュエータ ピン ---
-LINEAR_IN1 = 5
-LINEAR_IN2 = 6
-
-# --- センサー設定 ---
-SENSOR_HEIGHT_MM = 95.0
-PIXEL_TO_MM = 0.0017 * SENSOR_HEIGHT_MM
-PROFILE_FILE = "bno_profile.json"
-
-# ======== 2. マップ定義 ========
-
-MAP_DATA_PATH = "room.dat"
-RAW_MAP_DATA = []
-if os.path.exists(MAP_DATA_PATH):
-    with open(MAP_DATA_PATH, "r") as f:
-        RAW_MAP_DATA = [line.rstrip() for line in f]
-else:
-    # ダミーマップ（テスト用）
-    RAW_MAP_DATA = ["0"*20 for _ in range(20)]
-
-# 変更: Grid座標ではなく物理座標(mm)の初期値に変更 (例: x=1000mm, y=1000mm)
-target_pose = (1000.0, 1000.0, 0.0)
-
-
-manual_control = False
-manual_speed = 0.0
-manual_direction = 0.0
-manual_angle = 0.0
-manual_rotate = False
-manual_liniar = 0
-
-move_queue = queue.Queue()
-#----- 動作キュー -----
-AUTOMOVE = 1
+# ==========================================
+# 2. グローバル変数・状態管理
+# ==========================================
 
 planner = None
-# 排他制御用ロック (位置情報の更新と読み取りが競合しないようにする)
+
+# ロボットの現在状態
+robot_state = {
+    "x": 200.0,
+    "y": 200.0,
+    "angle": 0.0  # 0度=上(北), 90度=右(東)
+}
+
+# 目標地点
+target_state = {
+    "x": 0.0,
+    "y": 0.0,
+    "angle": 0.0
+}
+current_goal_grid = None 
+
+# 排他制御用ロック
 position_lock = threading.Lock()
 
+# 手動操作フラグ
+manual_control = False
+manual_speed = 0.0
+manual_direction = 0
+manual_angle = 0.0
+manual_rotate = False
+manual_linear = 0
+
+# ==========================================
+# 3. クラス定義
+# ==========================================
 
 class Point(BaseModel):
     name: str
@@ -89,18 +74,16 @@ class Point(BaseModel):
     y: float
     angle: float
 
-# ---  ArduinoController ---
 class ArduinoController:
+    """Arduino接続エミュレータ"""
     def __init__(self, baudrate=9600):
         self.ser = None
         self.baudrate = baudrate
         self.port_name = self._find_arduino_port()
-        
         if self.port_name:
             self._connect()
         else:
-            print("Arduinoが見つかりません。")
-            self.ser = None
+            print("【Sim】Arduinoが見つかりません。シリアル通信はスキップされます。")
 
     def _find_arduino_port(self):
         ports = list(serial.tools.list_ports.comports())
@@ -111,64 +94,29 @@ class ArduinoController:
 
     def _connect(self):
         try:
-            print(f"Arduinoを {self.port_name} で検出。接続中...")
             self.ser = serial.Serial(self.port_name, self.baudrate, timeout=1)
             time.sleep(2)
-            
-        except serial.SerialException as e:
-            print(f"Arduino接続エラー: {e}")
+            print(f"【Sim】Arduino接続完了: {self.port_name}")
+        except Exception as e:
+            print(f"【Sim】Arduino接続エラー: {e}")
             self.ser = None
 
     def send_command(self, command):
         if self.ser and self.ser.is_open:
             try:
-                data = command.encode('utf-8')
-                self.ser.write(data)
-                self.ser.flush() 
-                print(f">> Arduinoへコマンド '{command}' を送信しました")
-            except serial.SerialException as e:
-                print(f"送信エラー: {e}")
+                self.ser.write(command.encode('utf-8'))
+                self.ser.flush()
+                print(f"【Sim】Arduino送信: {command}")
+            except Exception as e:
+                print(f"【Sim】送信エラー: {e}")
         else:
-            print(f"エラー: Arduinoが接続されていないため '{command}' を送信できません")
+            print(f"【Sim】(仮想送信) Arduinoコマンド: {command}")
 
     def close(self):
-        if self.ser and self.ser.is_open:
-            self.ser.close()
-            print("Arduino接続を終了しました。")
-
-
-class RobotState:
-    def __init__(self, start_x, start_y, start_heading):
-        """
-        初期化: 物理座標 (mm) で受け取る
-        """
-        self.x = float(start_x)
-        self.y = float(start_y)
-        self.heading = start_heading
-        self.heading_offset = 0.0
-
-    def update(self, bno_heading, pmw_dx, pmw_dy):
-        """センサー値をもとに自己位置を更新"""
-        if bno_heading is not None:
-            self.heading = bno_heading
-
-        dist_fwd = pmw_dy * PIXEL_TO_MM
-        dist_side = pmw_dx * PIXEL_TO_MM
-
-        rad = math.radians(self.heading)
-        
-        dx_global = dist_fwd * math.sin(rad) + dist_side * math.cos(rad)
-        dy_global = -(dist_fwd * math.cos(rad) - dist_side * math.sin(rad))
-
-        self.x += dx_global
-        self.y -= dy_global
-
-    def get_grid_pos(self):
-        """マップ操作用: 現在の物理座標をグリッド座標に変換して返す"""
-        return int(self.x / GRID_SIZE_MM), int(self.y / GRID_SIZE_MM)
-
+        if self.ser: self.ser.close()
 
 class PathPlanner:
+    """A*アルゴリズムを用いた経路計画クラス"""
     def __init__(self, raw_map, inflation_r):
         self.grid = self._parse_map(raw_map)
         self.height = len(self.grid)
@@ -181,13 +129,12 @@ class PathPlanner:
         grid = []
         for row_str in raw_data:
             padded = row_str + '1' * (max_len - len(row_str))
-            grid.append([int(c) for c in padded])
+            grid.append([1 if c == '1' else 0 for c in padded])
         return np.array(grid)
 
     def _create_cost_map(self):
         cost_map = self.grid.copy()
         rows, cols = cost_map.shape
-        
         obstacles = np.argwhere(self.grid == 1)
         
         for r, c in obstacles:
@@ -195,7 +142,6 @@ class PathPlanner:
             r_max = min(rows, r + self.inflation_r + 1)
             c_min = max(0, c - self.inflation_r)
             c_max = min(cols, c + self.inflation_r + 1)
-            
             cost_map[r_min:r_max, c_min:c_max] = 1
             
         return cost_map
@@ -203,50 +149,45 @@ class PathPlanner:
     def get_path_astar(self, start_grid, goal_grid):
         start = tuple(start_grid)
         goal = tuple(goal_grid)
-
-        if not (0 <= start[0] < self.width and 0 <= start[1] < self.height):
-             print(f"エラー: スタート地点 {start} がマップ範囲外です")
-             return None
-        if not (0 <= goal[0] < self.width and 0 <= goal[1] < self.height):
-             print(f"エラー: ゴール地点 {goal} がマップ範囲外です")
-             return None
+        
+        if not (0 <= start[0] < self.width and 0 <= start[1] < self.height): return None
+        if not (0 <= goal[0] < self.width and 0 <= goal[1] < self.height): return None
+        if self.cost_map[goal[1]][goal[0]] == 1: return None 
 
         if self.cost_map[start[1]][start[0]] == 1:
-            print("警告: スタート地点が障害物(またはその付近)内です")
-        if self.cost_map[goal[1]][goal[0]] == 1:
-            print("エラー: ゴール地点が障害物内または到達不能エリアです")
-            return None
+            found = False
+            for dy in range(-2, 3):
+                for dx in range(-2, 3):
+                    nx, ny = start[0]+dx, start[1]+dy
+                    if 0 <= nx < self.width and 0 <= ny < self.height:
+                        if self.cost_map[ny][nx] == 0:
+                            start = (nx, ny)
+                            found = True
+                            break
+                if found: break
+            if not found: return None
 
         open_set = []
         heapq.heappush(open_set, (0, start))
-        
         came_from = {}
         g_score = {start: 0}
         
         while open_set:
             current = heapq.heappop(open_set)[1]
-
             if current == goal:
                 return self._reconstruct_path(came_from, current)
 
-            neighbors = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-            
-            for dx, dy in neighbors:
+            for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0)]:
                 neighbor = (current[0] + dx, current[1] + dy)
-                
-                if not (0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height):
-                    continue
-                if self.cost_map[neighbor[1]][neighbor[0]] == 1:
-                    continue
+                if not (0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height): continue
+                if self.cost_map[neighbor[1]][neighbor[0]] == 1: continue
 
                 tentative_g = g_score[current] + 1
-                
                 if neighbor not in g_score or tentative_g < g_score[neighbor]:
                     came_from[neighbor] = current
                     g_score[neighbor] = tentative_g
-                    f_score = tentative_g + abs(neighbor[0] - goal[0]) + abs(neighbor[1] - goal[1])
-                    heapq.heappush(open_set, (f_score, neighbor))
-                    
+                    f = tentative_g + abs(neighbor[0] - goal[0]) + abs(neighbor[1] - goal[1])
+                    heapq.heappush(open_set, (f, neighbor))
         return None
 
     def _reconstruct_path(self, came_from, current):
@@ -257,428 +198,264 @@ class PathPlanner:
         path.reverse()
         return path
 
+# ==========================================
+# 4. バックグラウンド シミュレーション
+# ==========================================
 
-# PWMインスタンス
-p1, p2, p3, p4 = None, None, None, None
-
-def setup_hardware():
-    global p1, p2, p3, p4
-    GPIO.setwarnings(False)
-    GPIO.setmode(GPIO.BCM)
-    pins = [IN1, IN2, IN3, IN4, L_EN, R_EN, LINEAR_IN1, LINEAR_IN2]
-    for pin in pins:
-        GPIO.setup(pin, GPIO.OUT)
-        GPIO.output(pin, GPIO.LOW)
+def background_simulation():
+    global robot_state, current_goal_grid, target_state, planner
     
-    p1 = GPIO.PWM(IN1, FREQ); p2 = GPIO.PWM(IN2, FREQ)
-    p3 = GPIO.PWM(IN3, FREQ); p4 = GPIO.PWM(IN4, FREQ)
-    GPIO.output(L_EN, GPIO.HIGH)
-    GPIO.output(R_EN, GPIO.HIGH)
-    
-    p1.start(0); p2.start(0); p3.start(0); p4.start(0)
+    # マップ読み込み
+    raw_map = []
+    if os.path.exists(MAP_DATA_PATH):
+        with open(MAP_DATA_PATH, "r") as f:
+            raw_map = [line.strip() for line in f]
+    else:
+        print("マップファイルが見つかりません。ダミーを使用します。")
+        raw_map = ["1"*20, "1"+"0"*18+"1"] + ["1"+"0"*18+"1" for _ in range(15)] + ["1"*20]
 
-def set_motor_speed(left_speed, right_speed, rotate=False, brake=False,):
-    if(brake == True):
-        p1.ChangeDutyCycle(100); p2.ChangeDutyCycle(100)
-        p3.ChangeDutyCycle(100); p4.ChangeDutyCycle(100)
-        return
-    
-    l = max(-100, min(100, left_speed))
-    r = max(-100, min(100, right_speed))
-    
-    # 左
-    if l > 0: p1.ChangeDutyCycle(l); p2.ChangeDutyCycle(0)
-    else: p1.ChangeDutyCycle(0); p2.ChangeDutyCycle(abs(l))
-    # 右
-    if r > 0: p3.ChangeDutyCycle(r); p4.ChangeDutyCycle(0)
-    else: p3.ChangeDutyCycle(0); p4.ChangeDutyCycle(abs(r))
+    planner = PathPlanner(raw_map, INFLATION_RADIUS)
+    print("シミュレーション開始: 非ホロノミック移動モード (0度=上)")
 
-def get_bno_heading(sensor):
-    for _ in range(5):
-        try:
-            h = sensor.euler[0]
-            if h is not None: return h
-        except: pass
-        time.sleep(0.005)
-    return None
-
-def monitor_position(robot_instance, bno_sensor, pmw_sensor):
     while True:
-        h = get_bno_heading(bno_sensor)
-        try:
-            dx, dy = pmw_sensor.get_motion()
-        except:
-            dx, dy = 0, 0
+        time.sleep(UPDATE_INTERVAL)
+        
+        # ----------------------------------
+        # 1. 手動モード (Manual Control)
+        # ----------------------------------
+        if manual_control:
+            with position_lock:
+                # (1) 旋回
+                if manual_angle != 0:
+                    turn_amount = manual_angle * 0.5
+                    robot_state["angle"] = (robot_state["angle"] + turn_amount) % 360
+                
+                # (2) 前進・後退
+                if manual_speed != 0 and manual_direction != 0:
+                    v = manual_speed * 10.0
+                    if manual_direction == -1: v *= -1
+                    
+                    rad = math.radians(robot_state["angle"])
+                    
+                    # 【修正箇所1】本番プログラムに合わせて座標系を変更
+                    # 0度=上(Y-), 90度=右(X+)
+                    # X移動量: v * sin(angle)
+                    # Y移動量: -v * cos(angle)
+                    nx = robot_state["x"] + v * math.sin(rad)
+                    ny = robot_state["y"] - v * math.cos(rad)
+                    
+                    gx, gy = int(nx / GRID_SIZE_MM), int(ny / GRID_SIZE_MM)
+                    if 0 <= gy < planner.height and 0 <= gx < planner.width:
+                        if planner.grid[gy][gx] == 0:
+                            robot_state["x"], robot_state["y"] = nx, ny
+            continue
+
+        # ----------------------------------
+        # 2. 自動移動モード (Auto Move)
+        # ----------------------------------
+        start_grid = (int(robot_state["x"] / GRID_SIZE_MM), int(robot_state["y"] / GRID_SIZE_MM))
+        
+        if current_goal_grid is None:
+            while True:
+                gy = random.randint(1, planner.height - 2)
+                gx = random.randint(1, planner.width - 2)
+                if planner.cost_map[gy][gx] == 0:
+                    current_goal_grid = (gx, gy)
+                    target_state["x"] = gx * GRID_SIZE_MM + GRID_SIZE_MM/2
+                    target_state["y"] = gy * GRID_SIZE_MM + GRID_SIZE_MM/2
+                    target_state["angle"] = float(random.randint(0, 360))
+                    print(f"新しい目的地: {current_goal_grid}")
+                    break
+        
+        path = planner.get_path_astar(start_grid, current_goal_grid)
+        
+        if not path or len(path) < 2:
+            if path and len(path) == 1:
+                diff = (target_state["angle"] - robot_state["angle"] + 360) % 360
+                if diff > 180: diff -= 360
+                
+                if abs(diff) > 2.0:
+                    turn = TURN_RATE_PIVOT if diff > 0 else -TURN_RATE_PIVOT
+                    if abs(turn) > abs(diff): turn = diff
+                    robot_state["angle"] = (robot_state["angle"] + turn) % 360
+                else:
+                    time.sleep(1)
+                    current_goal_grid = None
+            else:
+                time.sleep(1)
+                current_goal_grid = None
+            continue
+
+        next_node = path[1]
+        tgt_x = next_node[0] * GRID_SIZE_MM + GRID_SIZE_MM/2
+        tgt_y = next_node[1] * GRID_SIZE_MM + GRID_SIZE_MM/2
+        
+        dx = tgt_x - robot_state["x"]
+        dy = tgt_y - robot_state["y"]
+        dist = math.sqrt(dx**2 + dy**2)
+        
+        # 【修正箇所2】ターゲット方位の計算を本番ロジックに合わせる
+        # 本番: target_rad = math.atan2(dx, -dy) 
+        # (Y軸が下向きプラスのため、上向きを0度にするには -dy を使う)
+        tgt_rad = math.atan2(dx, -dy)
+        tgt_deg = math.degrees(tgt_rad)
+        if tgt_deg < 0: tgt_deg += 360
+        
+        angle_diff = (tgt_deg - robot_state["angle"] + 360) % 360
+        if angle_diff > 180: angle_diff -= 360
         
         with position_lock:
-            robot_instance.update(h, dx, dy)
-        
-        time.sleep(0.02)
-
-# ======== 変更箇所: target_pos_mm (物理座標) を受け取るように変更 ========
-def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
-    target_x_mm, target_y_mm, target_angle = target_pos_mm
-    
-    goal_grid_x = int(target_x_mm / GRID_SIZE_MM)
-    goal_grid_y = int(target_y_mm / GRID_SIZE_MM)
-    goal_grid = (goal_grid_x, goal_grid_y)
-
-    with position_lock:
-        start_grid = robot.get_grid_pos()
-    
-    print(f"Start: {start_grid} -> Goal: {goal_grid}")
-    path = _planner.get_path_astar(start_grid, goal_grid)
-    
-    if not path:
-        print("経路なし")
-        return False
-    
-    # 状態管理フラグ（True: その場で旋回中, False: 直進中）
-    state_turning = True 
-
-    for i in range(1, len(path)):
-        next_node = path[i]
-        
-        # マップ上のY軸は「下」がプラス、ロボットは「上(前)」に進む前提
-        # ここは変更せず、そのまま物理座標へ
-        next_target_x_mm = next_node[0] * GRID_SIZE_MM + GRID_SIZE_MM/2
-        next_target_y_mm = next_node[1] * GRID_SIZE_MM + GRID_SIZE_MM/2
-        
-        if i == len(path) - 1:
-            next_target_x_mm = target_x_mm
-            next_target_y_mm = target_y_mm
-        
-        print(f"Next WP: ({next_target_x_mm:.0f}, {next_target_y_mm:.0f})")
-
-        while True:            
-            with position_lock:
-                cx = robot.x
-                cy = robot.y
-                ch = robot.heading
-
-            dx = next_target_x_mm - cx
-            dy = next_target_y_mm - cy
-            dist = math.sqrt(dx**2 + dy**2)
-            
-            if dist < DIST_THRESHOLD_MM:
-                set_motor_speed(0, 0)
-                break
-
-            # ★重要: Y軸が画像座標(下がプラス)の場合、ロボット座標(前がプラス)に合わせるため -dy
-            # もしマップが数学座標(上がプラス)なら dy に戻す
-            target_rad = math.atan2(dx, -dy)
-            target_deg = math.degrees(target_rad)
-            if target_deg < 0: target_deg += 360
-
-            # 角度差分 (-180 ~ +180)
-            diff = (target_deg - ch + 180) % 360 - 180
-            if abs(diff) > 170:
-                print(f"U-Turn Mode: Diff={diff:.1f}")
-                set_motor_speed(70, -70) 
-                time.sleep(0.05)
-                continue # 以下のPID制御をスキップしてループ先頭へ
-            # --- デバッグログ ---
-            # これを見て「行きたい方向(Tgt)」が正しいか確認してください
-            # 例: 右前に行きたいのに Tgt が 220 (左後ろ) とかになっていないか
-            print(f"Tgt:{target_deg:.0f} Cur:{ch:.0f} Diff:{diff:.0f} Dist:{dist:.0f} Mode:{'TURN' if state_turning else 'GO'}")
-
-            # --- ヒステリシス制御 (振動対策) ---
-            # 一度回転モードに入ったら、角度がしっかり合うまで(例:5度以内)回転を続ける
-            # 一度直進モードに入ったら、角度が大きくずれるまで(例:30度以上)回転に戻らない
-            if state_turning:
-                if abs(diff) < 10.0: # 許容範囲に入ったら直進モードへ
-                    state_turning = False
-                    set_motor_speed(0, 0) # 反動を消すため一瞬止める
-                    time.sleep(0.1)
+            if dist < SPEED:
+                robot_state["x"] = tgt_x
+                robot_state["y"] = tgt_y
+            else:
+                if abs(angle_diff) > ANGLE_THRESHOLD:
+                    turn = TURN_RATE_PIVOT if angle_diff > 0 else -TURN_RATE_PIVOT
+                    robot_state["angle"] = (robot_state["angle"] + turn) % 360
                 else:
-                    # 回転継続
-                    turn_pow = KP_TURN * diff
-                    # 最小パワーの確保（モーターが唸るだけで動かないのを防ぐ）
-                    min_p = 80 # 少し強めに
-                    if turn_pow > 0: turn_pow = max(turn_pow, min_p)
-                    else: turn_pow = min(turn_pow, -min_p)
-                    set_motor_speed(-turn_pow, turn_pow)
+                    turn = TURN_RATE_MOVE if angle_diff > 0 else -TURN_RATE_MOVE
+                    if abs(turn) > abs(angle_diff): turn = angle_diff
+                    robot_state["angle"] = (robot_state["angle"] + turn) % 360
+                    
+                    # 【修正箇所3】自動移動の前進計算を本番ロジックに合わせる
+                    # X += speed * sin(angle)
+                    # Y -= speed * cos(angle)
+                    current_rad = math.radians(robot_state["angle"])
+                    robot_state["x"] += SPEED * math.sin(current_rad)
+                    robot_state["y"] -= SPEED * math.cos(current_rad)
 
-            else: # 直進モード
-                if abs(diff) > 30.0: # ズレが大きくなりすぎたら回転モードへ戻る
-                    state_turning = True
-                    set_motor_speed(0, 0)
-                else:
-                    # 直進補正
-                    correction = diff * KP_DIST
-                    # ベース速度を少し落として安定させる
-                    curr_base = BASE_SPEED
-                    l = curr_base - correction
-                    r = curr_base + correction
-                    set_motor_speed(l, r)
-            
-            time.sleep(0.05) # ループ速度調整
 
-    set_motor_speed(0, 0)
-    return True
-
-def move_linear(status):
-    if(status==1):  #上昇
-        GPIO.output(LINEAR_IN1, GPIO.LOW)
-        GPIO.output(LINEAR_IN2, GPIO.HIGH)
-    elif(status==-1): #下降
-        GPIO.output(LINEAR_IN1, GPIO.HIGH)
-        GPIO.output(LINEAR_IN2, GPIO.LOW)
-    else: #STOP
-        GPIO.output(LINEAR_IN1, GPIO.LOW)
-        GPIO.output(LINEAR_IN2, GPIO.LOW)
+# ==========================================
+# 5. API エンドポイント定義
+# ==========================================
 
 app = FastAPI()
-
-robot = None
 arduino = ArduinoController()
 
-@app.middleware("http")
-async def add_my_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "http://localhost:3000"
-    return response
-@app.get("/")
-async def root():
-    return {"message":"Привет! Я MoFeL!!"}
+@app.on_event("startup")
+def startup_event():
+    t = threading.Thread(target=background_simulation, daemon=True)
+    t.start()
 
-# ソフトウェア系受応答API
+@app.middleware("http")
+async def add_cors_header(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
+
+@app.get("/")
+def root():
+    return {"message": "Simulation API Online"}
+
 @app.get("/position")
-async def position():
+def get_position():
     with position_lock:
-        if robot:
-            return {"x":robot.x,"y":robot.y,"angle":robot.heading}
-        return {"x":0, "y":0,"angle":0}
+        return robot_state
 
 @app.get("/mapdata")
-async def mapdata():
-    return{"mapdata":RAW_MAP_DATA}
-
-@app.get("/costmapdata")
-async def costmapdata():
-    if planner and hasattr(planner, 'cost_map'):
-        return {"mapdata": planner.cost_map.tolist()}
+def get_mapdata():
+    if planner:
+        str_map = []
+        for row in planner.grid:
+            str_map.append("".join(map(str, row)))
+        return {"mapdata": str_map}
     return {"mapdata": []}
 
-@app.get("/saved_target_points")
-async def target_points():
-    with open(SAVED_POINTS_FILE, mode='r', encoding='utf-8') as file:
-        data = json.load(file)
-        return data
-
-@app.post("/saved")
-def save_points(points: List[Point]):
-    saved_points_list = []
-    for point in points:
-        saved_points_list.append({
-            "name": point.name, 
-            "x": point.x, 
-            "y": point.y, 
-            "angle": point.angle
-        })
-    
-    output_data = {
-        "points": saved_points_list
-    }
-    try:
-        with open(SAVED_POINTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, ensure_ascii=False)
-        return {"message": "saved"}
-    
-    except Exception as e:
-        return {"message": "error", "error": str(e)}
+@app.get("/costmapdata")
+def get_costmapdata():
+    if planner is not None:
+        cost_str_list = []
+        for row in planner.cost_map:
+            cost_str_list.append("".join(map(str, row)))
+        return {"costmapdata": cost_str_list}
+    return {"costmapdata": []}
 
 @app.get("/target_point")
-async def target_point():
-    return{
-        "x" : target_pose[0],
-        "y" : target_pose[1],
-        "angle" : target_pose[2]
-    }
+def get_target_point():
+    return target_state
 
 @app.get("/set_target_point")
-async def set_target_point(
-    x: float,
-    y:float,
-    angle:float,
-):
-    global target_pose
-    # ユーザーからは物理座標 (mm) が送られてくると想定してそのまま格納
-    target_pose = (x, y, angle)
-    return{
-        "x":x,
-        "y":y,
-        "angle":angle
-    }
-
-# 物理動作制御用API
+def set_target_point(x: float, y: float, angle: float):
+    global target_state, current_goal_grid
+    target_state = {"x": x, "y": y, "angle": angle}
+    gx = int(x / GRID_SIZE_MM)
+    gy = int(y / GRID_SIZE_MM)
+    if planner and 0 <= gx < planner.width and 0 <= gy < planner.height:
+        current_goal_grid = (gx, gy)
+        print(f"ユーザー指定ターゲット: {current_goal_grid}")
+    return target_state
 
 @app.get("/automove_start")
-async def automove_start():
-    move_queue.put(AUTOMOVE)
-    return{
-        "auto":"started"
-    }
+def automove_start():
+    return {"auto": "started"}
 
 @app.get("/controll_api")
-def control_api(
-    direction: int, 
-    speed: float,      
-    angle: float,
-    rotate: bool  
-):
-    global manual_control, manual_speed, manual_direction, manual_angle, manual_rotate
+def control_api(direction: int, speed: float, angle: float, rotate: bool):
+    global manual_direction, manual_speed, manual_angle, manual_rotate
     manual_direction = direction
     manual_speed = speed / 5.0
     manual_angle = angle
     manual_rotate = rotate
-    print(f"受信データ: direction={direction}, speed={manual_speed}, angle={angle}, rotate={rotate}")
-    return {
-        "status": "controlled"
-    }
+    return {"status": "controlled"}
 
 @app.get("/set_manual_mode")
-def manual_mode(mode:bool):
+def set_manual_mode(mode: bool):
     global manual_control
-    manual_control = bool(mode)
-    return{
-        "manual_control": manual_control
-    }
+    manual_control = mode
+    print(f"Manual Mode: {manual_control}")
+    return {"manual_control": manual_control}
 
 @app.get("/linear")
-def linear_move(mode:str):
-    global manual_liniar
-    if(mode=="up"):
-        manual_liniar = 1
-    elif(mode=="down"):
-        manual_liniar = -1
-    else: #STOP
-        manual_liniar = 0
-    return{
-        "linear": manual_liniar
-    }
+def linear_move(mode: str):
+    global manual_linear
+    if mode == "up": manual_linear = 1
+    elif mode == "down": manual_linear = -1
+    else: manual_linear = 0
+    return {"linear": manual_linear}
 
 @app.get("/slide")
-def slide_move(mode:str):
-    print(f"Slide Command Received: {mode}")
-    
-    if mode == "open":
-        arduino.send_command('o')
-    elif mode == "close":
-        arduino.send_command('c')
-    else:
-        print(f"Unknown slide mode: {mode}")
-
+def slide_move(mode: str):
+    if mode == "open": arduino.send_command('o')
+    elif mode == "close": arduino.send_command('c')
     return {"slide": mode}
 
+@app.get("/saved_target_points")
+def get_saved_points():
+    if os.path.exists(SAVED_POINTS_FILE):
+        try:
+            with open(SAVED_POINTS_FILE, mode='r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return {"points": []}
+    return {"points": []}
+
+@app.post("/add_target_point")
+def save_points(point: Point):
+    data = point.dict()
+    try:
+        points = []
+        if os.path.exists(SAVED_POINTS_FILE):
+            try:
+                with open(SAVED_POINTS_FILE, "r", encoding="utf-8") as rf:
+                    points = json.load(rf)
+            except json.JSONDecodeError:
+                points = []
+        found = False
+        for i, p in enumerate(points):
+            if p.get("name") == data["name"]:
+                points[i] = data
+                found = True
+                break
+        if not found:
+            points.append(data)
+        with open(SAVED_POINTS_FILE, "w", encoding="utf-8") as wf:
+            json.dump(points, wf, ensure_ascii=False, indent=4)
+        return {"message": "saved"}
+    except Exception as e:
+        return {"message": "error", "error": str(e)}
 
 def main():
-    try:
-        setup_hardware()
-        i2c = board.I2C()
-        bno = adafruit_bno055.BNO055_I2C(i2c, address=0x29)
-        if os.path.exists(PROFILE_FILE):
-            with open(PROFILE_FILE, "r") as f:
-                saved_offsets = json.load(f)
-            bno.offsets_accelerometer = tuple(saved_offsets["accel"])
-            bno.offsets_gyroscope = tuple(saved_offsets["gyro"])
-            bno.offsets_magnetometer = tuple(saved_offsets["mag"])
-            time.sleep(0.05)
-            print("BNOプロファイルを読み込みました。")
-        else:
-            print(f"警告: {PROFILE_FILE} が見つかりません。")
-        
-        bno.mode = adafruit_bno055.NDOF_MODE
-        time.sleep(1)
-        
-        pmw = PMW3901()
-
-        start_heading = get_bno_heading(bno)
-        if start_heading is None:
-            print("BNOエラー")
-            return
-
-        start_x_grid = 7
-        start_y_grid = 7
-        
-        # Grid座標から物理座標(mm)へ変換して渡す
-        start_x_mm = start_x_grid * GRID_SIZE_MM
-        start_y_mm = start_y_grid * GRID_SIZE_MM
-        
-        global robot
-        robot = RobotState(start_x_mm, start_y_mm, start_heading)
-
-        global planner
-        planner = PathPlanner(RAW_MAP_DATA, inflation_r=INFLATION_RADIUS)
-        
-        # --- 位置監視用スレッドの開始 ---
-        monitor_thread = threading.Thread(target=monitor_position, args=(robot, bno, pmw), daemon=True)
-        monitor_thread.start()
-        print("位置監視システムを開始しました。")
-
-        def run_api():
-            uvicorn.run(app, host="0.0.0.0", port=8100, log_level="debug")
-        
-        api_thread = threading.Thread(target=run_api, daemon=True)
-        api_thread.start()
-        
-        OP_QUEUE = []
-        while True: #主ループ
-            EB = False
-            # 手動コントロール用
-            while(manual_control):
-                if(manual_direction != 0 and not manual_rotate):
-                    if(manual_speed < 0):
-                        manual_left = 0
-                        manual_right = 0
-                        EB = True
-                    elif(manual_direction == 1 or manual_direction == -1):
-                        EB = False
-                        if(manual_angle > 0): #右曲がり
-                            manual_left = manual_direction * manual_speed * (100 - manual_angle)
-                            manual_right = manual_direction * manual_speed * 100
-                        elif(manual_angle <= 0): #左曲がり
-                            manual_left = manual_direction * manual_speed * 100
-                            manual_right = manual_direction * manual_speed * (100 + manual_angle)
-                        #END IF
-                elif(manual_direction != 0 and manual_rotate): #超信地旋回
-                    EB = False
-                    manual_right = manual_direction * manual_speed * manual_angle
-                    manual_left = -1 * manual_right
-                else:
-                    manual_right = 0
-                    manual_left = 0
-                #END IF
-
-                set_motor_speed(manual_left, manual_right,False,EB)
-                move_linear(manual_liniar)
-                time.sleep(0.05)
-                continue
-            #END WHILE(manual_control)
-            time.sleep(0.05)
-            
-            if(move_queue.qsize() > 0):
-                buf_queue = move_queue.get()
-                print("queue now")
-                print(move_queue.qsize())
-                match buf_queue:
-                    case  int(x) if buf_queue == AUTOMOVE:
-                        # 修正: グローバル変数の名前変更に対応
-                        print("auto move")
-                        move_to_target(planner, robot, bno, pmw, target_pose)
-                    #END CASE AUTOMOVE
-
-            #END IF buf_queue
-        #END WHILE(True)
-    #END TRY
-
-
-    except KeyboardInterrupt:
-        print("\n停止")
-    finally:
-        set_motor_speed(0, 0)
-        GPIO.cleanup()
-        arduino.close()
+    uvicorn.run(app, host="0.0.0.0", port=8100, log_level="info")
 
 if __name__ == "__main__":
     main()
