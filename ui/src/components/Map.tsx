@@ -7,8 +7,22 @@ import {
   Typography,
   Container,
   Stack,
-  Paper
+  Paper,
+  Popover,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  TextField,
+  DialogActions,
 } from "@mui/material";
+
+interface Point {
+  name: string;
+  x: number;
+  y: number;
+  angle: number;
+}
 
 export default function Map() {
   const TILE_SIZE = 20;
@@ -24,6 +38,12 @@ export default function Map() {
   const [target_x, setTargetX] = useState<number>(0);
   const [target_y, setTargetY] = useState<number>(0);
   const [target_angle, setTargetAngle] = useState<number>(0);
+
+  // --- 追加: タップ操作とダイアログ用State ---
+  const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
+  const [selectedGrid, setSelectedGrid] = useState<{r: number, c: number} | null>(null);
+  const [isNameDialogOpen, setNameDialogOpen] = useState(false);
+  const [pointName, setPointName] = useState("");
 
   const fetch_mapdata = async () => {
     try {
@@ -81,16 +101,79 @@ export default function Map() {
     return () => clearInterval(intervalId);
   }, []);
 
+  // --- 追加: タイルクリック時の処理 ---
+  const handleTileClick = (event: React.MouseEvent<HTMLElement>, rowIndex: number, colIndex: number, isWall: boolean, isCost: boolean) => {
+    // 壁やコスト領域なら何もしない
+    if (isWall || isCost) {
+      return;
+    }
+    // ポップオーバーを表示
+    setAnchorEl(event.currentTarget);
+    setSelectedGrid({ r: rowIndex, c: colIndex });
+  };
+
+  // --- 追加: ポップオーバーを閉じる ---
+  const handlePopoverClose = () => {
+    setAnchorEl(null);
+    setSelectedGrid(null);
+  };
+
+  // --- 追加: 「目標地点の追加」ボタンクリック ---
+  const handleAddButtonClick = () => {
+    setAnchorEl(null); // ポップオーバーを閉じる
+    setPointName("");  // 名前入力をリセット
+    setNameDialogOpen(true); // ダイアログを開く
+  };
+
+  // --- 追加: 保存処理 ---
+  const handleSavePoint = async () => {
+    if (!selectedGrid) return;
+
+    // グリッド座標から物理座標(mm)へ変換
+    // マスの中心座標にするため + TILE_WIDTH / 2 (25mm) を加算
+    const physicalX = selectedGrid.c * TILE_WIDTH + TILE_WIDTH / 2.0;
+    const physicalY = selectedGrid.r * TILE_WIDTH + TILE_WIDTH / 2.0;
+
+    const payload: Point = {
+      name: pointName || Date.now().toString(), // 空ならデフォルト名
+      x: physicalX,
+      y: physicalY,
+      angle: 0.0, // タップ指定なので角度は一旦0度とします
+    };
+
+    try {
+      const res = await fetch("/api/local/add_target_point", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.ok) {
+        console.log("Saved successfully");
+      } else {
+        console.error("Failed to save point");
+      }
+    } catch (error) {
+      console.error("Error saving point:", error);
+    }
+
+    setNameDialogOpen(false); // ダイアログを閉じる
+    setSelectedGrid(null);
+  };
+
   const playerPixelX = (position_x / TILE_WIDTH) * TILE_SIZE;
   const playerPixelY = (position_y / TILE_WIDTH) * TILE_SIZE;
 
   const targetPixelX = (target_x / TILE_WIDTH) * TILE_SIZE;
   const targetPixelY = (target_y / TILE_WIDTH) * TILE_SIZE;
 
-  // サイズ計算
   const iconHalfWidth = TILE_SIZE * 4.5;
-  const iconWidth = iconHalfWidth * 2; // 全幅
+  const iconWidth = iconHalfWidth * 2;
   const iconHeight = TILE_SIZE * 0.8 * 4.5;
+
+  const openPopover = Boolean(anchorEl);
 
   return (
     <Box
@@ -115,30 +198,23 @@ export default function Map() {
               flexDirection: "column",
             }}
           >
-           {/* 【修正ポイント】
-              borderではなく、四角いBoxをclip-pathで三角形に切り抜きます。
-              これにより、要素の中心(center)が「三角形の重心付近」になり、
-              回転させても軸がブレなくなります。
-           */}
-           
            {/* プレイヤーアイコン (赤) */}
             <Box
               sx={{
                 position: "absolute",
                 width: iconWidth,
                 height: iconHeight,
-                bgcolor: "#e74c3c", // 色はここで指定
-                // 上向きの三角形に切り抜く
+                bgcolor: "#e74c3c",
                 clipPath: "polygon(50% 0%, 0% 100%, 100% 100%)",
                 
                 left: playerPixelX,
                 top: playerPixelY,
                 
-                // 中心を基準に配置し、回転させる
                 transform: `translate(-50%, -50%) rotate(${position_angle}deg)`,
                 transformOrigin: "center center", 
                 zIndex: 10,
                 transition: "all 0.3s ease-out",
+                pointerEvents: "none", // アイコンがクリックを邪魔しないように
               }}
             />
 
@@ -157,6 +233,7 @@ export default function Map() {
                 transform: `translate(-50%, -50%) rotate(${target_angle}deg)`,
                 transformOrigin: "center center",
                 zIndex: 10,
+                pointerEvents: "none",
               }}
             />
             
@@ -165,14 +242,18 @@ export default function Map() {
               <Box key={rowIndex} sx={{ display: "flex" }}>
                 {rowString.split("").map((cellChar, colIndex) => {
                   const isCost = costmapData[rowIndex]?.[colIndex] === "1";
+                  const isWall = cellChar === "1";
+                  
                   return (
                     <Box
                       key={`${rowIndex}-${colIndex}`}
+                      // --- 追加: クリックイベント ---
+                      onClick={(e) => handleTileClick(e, rowIndex, colIndex, isWall, isCost)}
                       sx={{
                         width: TILE_SIZE,
                         height: TILE_SIZE,
                         boxSizing: "border-box",
-                        bgcolor: cellChar === "1" ? "#2c3e50" : "#ecf0f1",
+                        bgcolor: isWall ? "#2c3e50" : "#ecf0f1",
                         border:
                           cellChar === "0"
                             ? "1px solid #bdc3c7"
@@ -180,6 +261,11 @@ export default function Map() {
                         backgroundImage: isCost 
                           ? "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.15) 0, rgba(255, 0, 0, 0.15) 2px, transparent 2px, transparent 6px)" 
                           : "none",
+                        // --- 追加: クリック可能な場所はカーソルを変える ---
+                        cursor: (!isWall && !isCost) ? "pointer" : "default",
+                        "&:hover": (!isWall && !isCost) ? {
+                          bgcolor: "#d6eaf8" // ホバー時のハイライト
+                        } : {}
                       }}
                     />
                   );
@@ -188,6 +274,48 @@ export default function Map() {
             ))}
           </Box>
         </Card>
+
+        {/* --- 追加: ポップオーバー (目標地点の追加ボタン) --- */}
+        <Popover
+          open={openPopover}
+          anchorEl={anchorEl}
+          onClose={handlePopoverClose}
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'center',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'center',
+          }}
+        >
+          <Box sx={{ p: 1 }}>
+            <Button size="small" variant="contained" onClick={handleAddButtonClick}>
+              目標地点の追加
+            </Button>
+          </Box>
+        </Popover>
+
+        {/* --- 追加: 名前入力ダイアログ --- */}
+        <Dialog open={isNameDialogOpen} onClose={() => setNameDialogOpen(false)}>
+          <DialogTitle>地点名の入力</DialogTitle>
+          <DialogContent>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="地点名"
+              type="text"
+              fullWidth
+              variant="standard"
+              value={pointName}
+              onChange={(e) => setPointName(e.target.value)}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setNameDialogOpen(false)}>キャンセル</Button>
+            <Button onClick={handleSavePoint} variant="contained">保存</Button>
+          </DialogActions>
+        </Dialog>
 
         <Paper
           variant="outlined"
