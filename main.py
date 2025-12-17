@@ -180,11 +180,18 @@ class RobotState:
         sin_map = math.sin(map_rad)
         cos_map = math.cos(map_rad)
 
+        # === 修正箇所 ここから ===
+        # 0度(北)は画面上方向(Yマイナス)なので、前進成分(cos)にマイナスを掛けます
+        
+        # X軸変位: 前進 × sin(θ) + 横移動 × cos(θ)
         dx_global = dist_fwd * sin_map + dist_side * cos_map
-        dy_global = -(dist_fwd * cos_map - dist_side * sin_map)
+        
+        # Y軸変位: -前進 × cos(θ) + 横移動 × sin(θ)
+        dy_global = -dist_fwd * cos_map + dist_side * sin_map
 
         self.x += dx_global
-        self.y -= dy_global
+        self.y += dy_global # ここは単純加算に変更
+        # === 修正箇所 ここまで ===
 
     def get_grid_pos(self):
         return int(self.x / GRID_SIZE_MM), int(self.y / GRID_SIZE_MM)
