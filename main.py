@@ -23,6 +23,7 @@ SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
 MAP_DATA_PATH = "room.dat"
 PROFILE_FILE = "bno_profile.json"
+CONFIG_FILE = "robot_config.json"
 
 GRID_SIZE_MM = 50.0      
 ROBOT_WIDTH_MM = 400.0   
@@ -47,7 +48,22 @@ LINEAR_IN1 = 5
 LINEAR_IN2 = 6
 
 SENSOR_HEIGHT_MM = 95.0
-PIXEL_TO_MM = 0.0017 * SENSOR_HEIGHT_MM
+
+def load_robot_config():
+    default_config = {
+        "pmw_rotation_deg": 0.0,
+        "pixel_to_mm": 0.0017 * SENSOR_HEIGHT_MM,
+        "bno_offset_deg": 0.0
+    }
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return default_config
+
+ROBOT_CONFIG = load_robot_config()
 
 target_pose = (1000.0, 1000.0, 0.0)
 
@@ -64,7 +80,6 @@ AUTOMOVE = 1
 planner = None
 robot = None
 position_lock = threading.Lock()
-
 
 class Point(BaseModel):
     name: str
@@ -139,24 +154,34 @@ class ArduinoController:
             self.ser.close()
             print("Arduino接続を終了しました。")
 
-
 class RobotState:
     def __init__(self, start_x, start_y, start_heading):
         self.x = float(start_x)
         self.y = float(start_y)
         self.heading = start_heading
 
-    def update(self, bno_heading, pmw_dx, pmw_dy):
-        if bno_heading is not None:
-            self.heading = bno_heading
+    def update(self, bno_raw_heading, pmw_raw_dx, pmw_raw_dy):
+        if bno_raw_heading is not None:
+            corrected_heading = bno_raw_heading - ROBOT_CONFIG["bno_offset_deg"]
+            self.heading = corrected_heading % 360
 
-        dist_fwd = pmw_dy * PIXEL_TO_MM
-        dist_side = pmw_dx * PIXEL_TO_MM
+        rot_rad = math.radians(ROBOT_CONFIG["pmw_rotation_deg"])
+        cos_r = math.cos(rot_rad)
+        sin_r = math.sin(rot_rad)
 
-        rad = math.radians(self.heading)
-        
-        dx_global = dist_fwd * math.sin(rad) + dist_side * math.cos(rad)
-        dy_global = -(dist_fwd * math.cos(rad) - dist_side * math.sin(rad))
+        dx_robot = pmw_raw_dx * cos_r - pmw_raw_dy * sin_r
+        dy_robot = pmw_raw_dx * sin_r + pmw_raw_dy * cos_r
+
+        scale = ROBOT_CONFIG["pixel_to_mm"]
+        dist_fwd = dy_robot * scale
+        dist_side = dx_robot * scale
+
+        map_rad = math.radians(self.heading)
+        sin_map = math.sin(map_rad)
+        cos_map = math.cos(map_rad)
+
+        dx_global = dist_fwd * sin_map + dist_side * cos_map
+        dy_global = -(dist_fwd * cos_map - dist_side * sin_map)
 
         self.x += dx_global
         self.y -= dy_global
@@ -747,10 +772,12 @@ def main():
         
         pmw = PMW3901()
 
-        start_heading = get_bno_heading(bno)
-        if start_heading is None:
+        start_raw_heading = get_bno_heading(bno)
+        if start_raw_heading is None:
             print("BNOエラー")
             return
+
+        start_map_heading = (start_raw_heading - ROBOT_CONFIG["bno_offset_deg"]) % 360
 
         start_x_grid = 7
         start_y_grid = 7
@@ -759,7 +786,7 @@ def main():
         start_y_mm = start_y_grid * GRID_SIZE_MM
         
         global robot
-        robot = RobotState(start_x_mm, start_y_mm, start_heading)
+        robot = RobotState(start_x_mm, start_y_mm, start_map_heading)
 
         raw_map_data = []
         if os.path.exists(MAP_DATA_PATH):
