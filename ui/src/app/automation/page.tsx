@@ -11,6 +11,7 @@ import {
     DialogContentText, 
     DialogActions 
 } from "@mui/material";
+import { alpha } from '@mui/material/styles';
 import Map from '@/components/Map'
 
 interface Point {
@@ -51,7 +52,6 @@ export default function Page() {
 
         const updateScale = () => {
             const containerRect = container.getBoundingClientRect();
-            
             const contentWidth = content.offsetWidth; 
             const contentHeight = content.offsetHeight;
             const containerWidth = containerRect.width;
@@ -61,16 +61,12 @@ export default function Page() {
 
             const scaleX = containerWidth / contentWidth;
             const scaleY = containerHeight / contentHeight;
-            
             const newScale = Math.min(scaleX, scaleY);
             
             setScale(newScale < 1 ? newScale : 1);
         };
 
-        const observer = new ResizeObserver(() => {
-            updateScale();
-        });
-
+        const observer = new ResizeObserver(updateScale);
         observer.observe(container);
         observer.observe(content);
         updateScale();
@@ -85,28 +81,16 @@ export default function Page() {
 
     const executeAutoMove = async () => {
         if (!pendingMovePoint) return;
-        
         try {
             const resSet = await fetch('/api/local/set_target_point', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(pendingMovePoint),
             });
-            
-            if (!resSet.ok) {
-                console.error('Failed to set target point');
-                return;
-            }
+            if (!resSet.ok) return;
 
             const resStart = await fetch('/api/local/automove_start');
-            if (resStart.ok) {
-                console.log(`Auto move started to ${pendingMovePoint.name}`);
-            } else {
-                console.error('Failed to start automove');
-            }
-
+            if (resStart.ok) console.log(`Auto move started to ${pendingMovePoint.name}`);
         } catch (error) {
             console.error('Error sending move command:', error);
         } finally {
@@ -117,15 +101,12 @@ export default function Page() {
 
     return (
         <Box sx={{ 
-            // 【修正】position: fixed と inset: 0 を削除しました
-            // これにより、Layoutで確保されたコンテンツエリア内に正しく収まります
             width: "100%",
             height: "100%",
-            
             display: "flex", 
             flexDirection: "column", 
-            overflow: "hidden", // ページ全体としてのスクロールは禁止(内部でスクロール)
-            bgcolor: "background.default",
+            overflow: "hidden",
+            bgcolor: "background.default", 
             p: 2, 
             boxSizing: "border-box"
         }}>
@@ -152,9 +133,10 @@ export default function Page() {
                         justifyContent: "center", 
                         alignItems: "center",
                         overflow: "hidden", 
-                        border: "1px solid #ddd", 
+                        border: 1, 
+                        borderColor: "divider", 
                         borderRadius: 1,
-                        bgcolor: "#fff",
+                        bgcolor: "background.paper", 
                         position: "relative",
                         minHeight: 0 
                     }}
@@ -190,49 +172,53 @@ export default function Page() {
                         overflowY: "auto", 
                         pr: 1 
                     }}>
-                        {
-                            points.map((point, index) => {
-                                const isSelected = selectedPointIndex === index;
-                                return (
-                                    <Box 
-                                        key={index} 
-                                        onClick={() => setSelectedPointIndex(isSelected ? null : index)}
-                                        sx={{ 
-                                            border: isSelected ? "2px solid #1976d2" : "1px solid #ccc", 
-                                            p: 1, 
-                                            mb: 1, 
-                                            borderRadius: 1, 
-                                            bgcolor: isSelected ? "#e3f2fd" : "background.paper",
-                                            cursor: "pointer",
-                                            transition: "all 0.2s"
-                                        }}
-                                    >
-                                        <Typography variant="subtitle2" fontWeight="bold">{point.name}</Typography>
-                                        <Box sx={{ pl: 1, fontSize: "0.875rem" }}>
-                                            <Typography variant="caption" display="block">X: {point.x}</Typography>
-                                            <Typography variant="caption" display="block">Y: {point.y}</Typography>
-                                            <Typography variant="caption" display="block">角度: {point.angle}</Typography>
-                                        </Box>
-
-                                        {isSelected && (
-                                            <Button 
-                                                variant="contained" 
-                                                color="secondary" 
-                                                fullWidth 
-                                                size="small"
-                                                sx={{ mt: 1 }}
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    handleMoveClick(point);
-                                                }}
-                                            >
-                                                ここに移動
-                                            </Button>
-                                        )}
+                        {points.map((point, index) => {
+                            const isSelected = selectedPointIndex === index;
+                            return (
+                                <Box 
+                                    key={index} 
+                                    onClick={() => setSelectedPointIndex(isSelected ? null : index)}
+                                    sx={{ 
+                                        border: isSelected ? 2 : 1,
+                                        borderColor: isSelected ? "primary.main" : "divider",
+                                        p: 1, 
+                                        mb: 1, 
+                                        borderRadius: 1, 
+                                        bgcolor: isSelected 
+                                            ? (theme) => alpha(theme.palette.primary.main, 0.1) 
+                                            : "background.paper",
+                                            
+                                        cursor: "pointer",
+                                        transition: "all 0.2s"
+                                    }}
+                                >
+                                    <Typography variant="subtitle2" fontWeight="bold">
+                                        {point.name}
+                                    </Typography>
+                                    <Box sx={{ pl: 1, fontSize: "0.875rem" }}>
+                                        <Typography variant="caption" display="block">X: {point.x}</Typography>
+                                        <Typography variant="caption" display="block">Y: {point.y}</Typography>
+                                        <Typography variant="caption" display="block">角度: {point.angle}</Typography>
                                     </Box>
-                                );
-                            })
-                        }
+
+                                    {isSelected && (
+                                        <Button 
+                                            variant="contained" 
+                                            color="secondary"
+                                            fullWidth 
+                                            size="small"
+                                            sx={{ mt: 1 }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleMoveClick(point);
+                                            }}
+                                        >
+                                            ここに移動
+                                        </Button>
+                                    )}
+                                </Box>
+                            );
+                        })}
                     </Box>
                 </Box>
             </Box>

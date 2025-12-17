@@ -13,6 +13,7 @@ export default function ControllerApp() {
     const [angleValue, setAngleValue] = useState(0);
     const [manualMode, setManualMode] = useState(false);
     const [rotateValue, setRotateMode] = useState(false);
+    const [isPortrait, setIsPortrait] = useState(false);
     const ws = useRef<WebSocket | null>(null);
 
     const handleChange = (event: any) => {
@@ -32,6 +33,10 @@ export default function ControllerApp() {
 
         const handleResize = () => {
             const h = window.innerHeight;
+            const w = window.innerWidth;
+            
+            setIsPortrait(h > w);
+
             const threshold = 450;
             const newScale = h <= threshold ? h / threshold : 1;
             setScale(newScale);
@@ -156,6 +161,26 @@ export default function ControllerApp() {
         }
     }, [handleBeforeUnload])
 
+    if (isPortrait) {
+        return (
+            <Box sx={{ 
+                position: "absolute", 
+                top: 0, 
+                left: 0, 
+                width: "100vw", 
+                height: "100vh", 
+                backgroundColor: '#222222',
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                zIndex: 9999
+            }}>
+                <Typography variant="h5" color="white" fontWeight="bold">
+                    横画面にしてください
+                </Typography>
+            </Box>
+        );
+    }
 
     return (
         <Box sx={{ position: "absolute", top: 0, left: 0, width: "100vw", height: "100vh", backgroundColor: '#222222' }}>

@@ -13,13 +13,14 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  DialogContentText, // 追加
+  DialogContentText,
   TextField,
   DialogActions,
   Snackbar,
   Grid,
   Slider,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 
 interface Point {
   name: string;
@@ -71,7 +72,6 @@ export default function Map() {
   const [pointName, setPointName] = useState("");
   const [pointAngle, setPointAngle] = useState<string | number>(0);
 
-  // ★追加: 移動確認ダイアログ用State
   const [isMoveConfirmOpen, setMoveConfirmOpen] = useState(false);
   const [pendingMovePoint, setPendingMovePoint] = useState<Point | null>(null);
 
@@ -177,7 +177,6 @@ export default function Map() {
     } else if (!isPlacementMode && !existingStocker) {
       setStockerGridKeys(new Set());
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlacementMode, existingStocker, mapdata]);
 
 
@@ -237,12 +236,10 @@ export default function Map() {
   };
 
   const validatePlacement = (tx: number, ty: number, angle: number) => {
-    // 青点(0,0): 壁NG, コストNG
     const blueRes = checkAreaOverlap(tx, ty, angle, [{x:0, y:0}]);
     if (blueRes.walls > 0 || blueRes.out > 0) return { valid: false, msg: "中心点が壁または範囲外です" };
     if (blueRes.costs > 0) return { valid: false, msg: "水色点は赤斜線内に進入できません" };
 
-    // 緑枠: 壁NG (コストOK)
     const stockerRes = checkAreaOverlap(tx, ty, angle, GREEN_FRAME_POINTS);
     if (stockerRes.walls > 0 || stockerRes.out > 0) return { valid: false, msg: "ストッカーが壁と重なっています" };
 
@@ -274,23 +271,93 @@ export default function Map() {
     fetch_costmapdata("base");
   };
 
+ // 修正版: スケール（拡大縮小）とスクロール、パディングを考慮した座標計算
   const handlePlacementMove = (clientX: number, clientY: number) => {
     if (isPlacementFrozen || !mapContainerRef.current || !mapdata.length) return;
     
-    const rect = mapContainerRef.current.getBoundingClientRect();
-    const mouseCol = Math.floor((clientX - rect.left) / TILE_SIZE);
-    const mouseRow = Math.floor((clientY - rect.top) / TILE_SIZE);
-    
+    const container = mapContainerRef.current;
+    const rect = container.getBoundingClientRect();
+
+    // 1. スケール倍率を算出
+    // (見た目のサイズ / 実際の内部サイズ)
+    // 通常は1ですが、transform: scale() が効いていると 1以外になります
+    const scaleX = rect.width / container.offsetWidth;
+    const scaleY = rect.height / container.offsetHeight;
+
+    // 2. コンテナ左上からの相対座標を計算
+    const visualRelX = clientX - rect.left;
+    const visualRelY = clientY - rect.top;
+
+    // 3. スケールによる補正（元のサイズ感に戻す）
+    const unscaledRelX = visualRelX / scaleX;
+    const unscaledRelY = visualRelY / scaleY;
+
+    // 4. スクロール量とパディング(10px)を考慮して、内部座標を確定
+    const paddingX = 10; 
+    const paddingY = 10;
+
+    const internalX = unscaledRelX + container.scrollLeft - paddingX;
+    const internalY = unscaledRelY + container.scrollTop - paddingY;
+
+    // グリッド座標に変換
+    const mouseCol = Math.floor(internalX / TILE_SIZE);
+    const mouseRow = Math.floor(internalY / TILE_SIZE);
+
+    // --- 以降は変更なし ---
     const mousePhysX = mouseCol * TILE_WIDTH + TILE_WIDTH / 2.0;
     const mousePhysY = mouseRow * TILE_WIDTH + TILE_WIDTH / 2.0;
 
-    const validationResult = validatePlacement(mousePhysX, mousePhysY, tempStocker.angle);
+    let bestX = mousePhysX, bestY = mousePhysY;
+    let bestAdjacencyScore = -1;
+    let foundValid = false;
+    const SEARCH_RADIUS = 3;
+    const rad = (tempStocker.angle * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
 
-    setTempStocker(prev => ({ ...prev, x: mousePhysX, y: mousePhysY }));
-    updateStockerGridKeys(mousePhysX, mousePhysY, tempStocker.angle);
+    for (let dr = -SEARCH_RADIUS; dr <= SEARCH_RADIUS; dr++) {
+      for (let dc = -SEARCH_RADIUS; dc <= SEARCH_RADIUS; dc++) {
+        const testX = mousePhysX + dc * TILE_WIDTH;
+        const testY = mousePhysY + dr * TILE_WIDTH;
+        
+        if (!validatePlacement(testX, testY, tempStocker.angle).valid) continue;
 
-    setPlacementValid(validationResult.valid);
-    setValidationMsg(validationResult.msg);
+        let currentScore = 0;
+        for (const p of GREEN_FRAME_POINTS) {
+            const absX = testX + (p.x * cos - p.y * sin);
+            const absY = testY + (p.x * sin + p.y * cos);
+            const c = Math.floor(absX / TILE_WIDTH);
+            const r = Math.floor(absY / TILE_WIDTH);
+            if (isWall(r+1, c)) currentScore++;
+            if (isWall(r-1, c)) currentScore++;
+            if (isWall(r, c+1)) currentScore++;
+            if (isWall(r, c-1)) currentScore++;
+        }
+
+        if (currentScore > bestAdjacencyScore) {
+            bestAdjacencyScore = currentScore;
+            bestX = testX; bestY = testY;
+            foundValid = true;
+        } else if (currentScore === bestAdjacencyScore && foundValid) {
+             if (Math.hypot(testX - mousePhysX, testY - mousePhysY) < Math.hypot(bestX - mousePhysX, bestY - mousePhysY)) {
+                bestX = testX; bestY = testY;
+            }
+        }
+      }
+    }
+
+    const finalX = foundValid ? bestX : mousePhysX;
+    const finalY = foundValid ? bestY : mousePhysY;
+    
+    setTempStocker(prev => ({ ...prev, x: finalX, y: finalY }));
+    updateStockerGridKeys(finalX, finalY, tempStocker.angle);
+
+    if (foundValid) {
+        setPlacementValid(true);
+        setValidationMsg(bestAdjacencyScore > 0 ? "壁に吸着中" : "");
+    } else {
+        setPlacementValid(false);
+        setValidationMsg(validatePlacement(mousePhysX, mousePhysY, tempStocker.angle).msg);
+    }
   };
 
   const onMapMouseMove = (e: React.MouseEvent) => { if (isPlacementMode) handlePlacementMove(e.clientX, e.clientY); };
@@ -342,14 +409,12 @@ export default function Map() {
     setNameDialogOpen(true);
   };
 
-  // 1. 移動ボタンクリック（確認ダイアログ表示）
   const handleMoveHere = () => {
     if (!selectedGrid) return;
     const physicalX = selectedGrid.c * TILE_WIDTH + TILE_WIDTH / 2.0;
     const physicalY = selectedGrid.r * TILE_WIDTH + TILE_WIDTH / 2.0;
     const angle = selectedSavedPoint ? selectedSavedPoint.angle : 0;
     
-    // 一時保存して確認画面へ
     const point: Point = { name: "Target", x: physicalX, y: physicalY, angle: angle };
     setPendingMovePoint(point);
     setMoveConfirmOpen(true);
@@ -357,12 +422,10 @@ export default function Map() {
     handlePopoverClose();
   };
 
-  // 2. 移動実行（API呼び出し）
   const executeAutoMove = async () => {
     if (!pendingMovePoint) return;
 
     try {
-      // ターゲットをセット
       const resSet = await fetch("/api/local/set_target_point", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -376,10 +439,8 @@ export default function Map() {
         return;
       }
       
-      // 目標地点表示を更新
       fetch_target_point();
 
-      // 自動移動開始コマンド
       const resStart = await fetch("/api/local/automove_start");
       if (resStart.ok) {
         console.log("Auto move started");
@@ -395,7 +456,6 @@ export default function Map() {
       setSnackMessage("通信エラーが発生しました");
       setSnackOpen(true);
     } finally {
-      // ダイアログを閉じる
       setMoveConfirmOpen(false);
       setPendingMovePoint(null);
     }
@@ -468,7 +528,6 @@ export default function Map() {
         fetch_stocker(); 
         setPlacementMode(false); 
         setPlacementFrozen(false);
-        // ★保存完了したら通常マップに戻す
         fetch_costmapdata("normal");
       }
     } catch (error) { console.error(error); }
@@ -482,7 +541,15 @@ export default function Map() {
   const openPopover = Boolean(anchorEl);
 
   return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "#f5f6fa", py: 4, display: "flex", flexDirection: "column", alignItems: "center" }}>
+    <Box sx={{ 
+        width: "100%", 
+        minHeight: "100vh", // マップ画面は高さ確保のため維持
+        bgcolor: "background.default", 
+        py: 4, 
+        display: "flex", 
+        flexDirection: "column", 
+        alignItems: "center" 
+    }}>
       <Container maxWidth="md" sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         
         <Box sx={{ width: '100%', display: 'flex', justifyContent: 'flex-end', mb: 2 }}>
@@ -497,7 +564,9 @@ export default function Map() {
             onMouseMove={onMapMouseMove}
             onTouchMove={onMapTouchMove}
             sx={{
-              position: "relative", padding: "10px", overflow: "auto", bgcolor: "#fff", display: "flex", flexDirection: "column",
+              position: "relative", padding: "10px", overflow: "auto", 
+              bgcolor: "background.paper", // テーマの背景色
+              display: "flex", flexDirection: "column",
               touchAction: isPlacementMode ? "none" : "auto", 
               cursor: isPlacementMode ? (isPlacementFrozen ? "default" : "move") : "default"
             }}
@@ -508,27 +577,14 @@ export default function Map() {
                 position: "absolute", width: 0, height: 0,
                 borderLeft: `${iconSize / 2}px solid transparent`,
                 borderRight: `${iconSize / 2}px solid transparent`,
-                borderBottom: `${iconSize}px solid #e74c3c`,
+                borderBottom: `${iconSize}px solid`, 
+                borderBottomColor: "error.main", // テーマのError色(赤)
                 left: playerPixelX + 10, top: playerPixelY + 10,
                 transform: `translate(-50%, -50%) rotate(${position_angle}deg)`,
                 zIndex: 20, pointerEvents: "none", transition: "all 0.1s ease-out"
               }}
             />
 
-            {/* ターゲットアイコン */}
-            {/*
-            <Box
-              sx={{
-                position: "absolute", width: 0, height: 0,
-                borderLeft: `${iconSize / 2}px solid transparent`,
-                borderRight: `${iconSize / 2}px solid transparent`,
-                borderBottom: `${iconSize}px solid #3498db`,
-                left: targetPixelX + 10, top: targetPixelY + 10,
-                transform: `translate(-50%, -50%) rotate(${target_angle}deg)`,
-                zIndex: 19, pointerEvents: "none", opacity: 0.8
-              }}
-            />*/}
-            
             {/* マップ描画 */}
             {mapdata.map((rowString: string, rowIndex) => (
               <Box key={rowIndex} sx={{ display: "flex" }}>
@@ -539,19 +595,36 @@ export default function Map() {
                   
                   const isStockerCell = stockerGridKeys.has(`${rowIndex}-${colIndex}`);
                   
-                  let bgcolor = isWall ? "#2c3e50" : savedPoint ? "#3498db" : "#ecf0f1";
+                  let bgcolor: string | ((theme: any) => string) = "grey.50"; // 通路(デフォルト)
+                  
+                  if (isWall) {
+                      bgcolor = "grey.800"; // 壁
+                  } else if (savedPoint) {
+                      bgcolor = "primary.main"; // 登録地点(テーマ色)
+                  }
                   
                   if (!isWall && isStockerCell) {
-                      if (isPlacementMode && !placementValid) bgcolor = "rgba(231, 76, 60, 0.7)"; 
-                      else bgcolor = "#7be37b"; 
+                      if (isPlacementMode && !placementValid) {
+                          // 無効な配置(赤色半透明)
+                          bgcolor = (theme) => alpha(theme.palette.error.main, 0.7);
+                      } else {
+                          // 有効な配置(緑色)
+                          bgcolor = "success.light";
+                      }
                   }
 
+                  // コスト領域の斜線
                   let bgImage = (!isWall && !savedPoint && isCost)
                           ? "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.15) 0, rgba(255, 0, 0, 0.15) 2px, transparent 2px, transparent 6px)" 
                           : "none";
                   
-                  let border = cellChar === "0" ? "1px solid #bdc3c7" : "1px solid #34495e";
-                  if (isStockerCell && isPlacementFrozen) border = "2px solid #2196f3";
+                  let borderColor = "divider";
+                  let borderWidth = "1px";
+                  if (isWall) borderColor = "grey.900";
+                  if (isStockerCell && isPlacementFrozen) {
+                      borderColor = "info.main"; 
+                      borderWidth = "2px";
+                  }
 
                   return (
                     <Box
@@ -559,16 +632,22 @@ export default function Map() {
                       onClick={(e) => handleTileClick(e, rowIndex, colIndex, isWall, isCost)}
                       sx={{
                         width: TILE_SIZE, height: TILE_SIZE, boxSizing: "border-box", position: "relative",
-                        bgcolor: bgcolor, border: border, backgroundImage: bgImage,
+                        bgcolor: bgcolor, 
+                        border: `${borderWidth} solid`,
+                        borderColor: borderColor,
+                        backgroundImage: bgImage,
                         cursor: (!isWall && !isCost && !isStockerCell) ? "pointer" : (isCost ? "not-allowed" : "default"),
-                        "&:hover": (!isWall && !isCost && !isPlacementMode) ? { bgcolor: "#d6eaf8" } : {}
+                        "&:hover": (!isWall && !isCost && !isPlacementMode) 
+                            ? { bgcolor: (theme) => alpha(theme.palette.primary.main, 0.2) } 
+                            : {}
                       }}
                     >
                         {savedPoint && (
                             <Box
                                 sx={{
                                     position: "absolute", top: "50%", left: "50%", width: "60%", height: "60%",
-                                    bgcolor: "white", clipPath: "polygon(50% 0%, 0% 100%, 50% 80%, 100% 100%)",
+                                    bgcolor: "common.white", 
+                                    clipPath: "polygon(50% 0%, 0% 100%, 50% 80%, 100% 100%)",
                                     transform: `translate(-50%, -50%) rotate(${savedPoint.angle}deg)`,
                                     transformOrigin: "center center",
                                 }}
@@ -591,7 +670,7 @@ export default function Map() {
                         pointerEvents: "none", zIndex: 100,
                     }}
                  >
-                     <Box sx={{ position:"absolute", width:14, height:14, bgcolor:"#03a9f4", transform:"translate(-50%,-50%)", zIndex:102, borderRadius: "50%" }} />
+                     <Box sx={{ position:"absolute", width:14, height:14, bgcolor:"info.main", transform:"translate(-50%,-50%)", zIndex:102, borderRadius: "50%" }} />
                  </Box>
              )}
 
@@ -616,7 +695,6 @@ export default function Map() {
           </Box>
         </Popover>
 
-        {/* --- 移動確認ダイアログ (新規追加) --- */}
         <Dialog open={isMoveConfirmOpen} onClose={() => setMoveConfirmOpen(false)}>
           <DialogTitle>移動確認</DialogTitle>
           <DialogContent>
@@ -683,17 +761,17 @@ export default function Map() {
         <Snackbar open={warningOpen} autoHideDuration={1000} onClose={() => setWarningOpen(false)} message={warningMessage} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
         <Snackbar open={snackOpen} autoHideDuration={2000} onClose={() => setSnackOpen(false)} message={snackMessage} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
 
-        <Paper variant="outlined" sx={{ mt: 2, p: 1, px: 2, bgcolor: 'rgba(255,255,255,0.6)', borderColor: 'transparent' }}>
+        <Paper variant="outlined" sx={{ mt: 2, p: 1, px: 2, bgcolor: (theme) => alpha(theme.palette.background.paper, 0.6), borderColor: 'transparent' }}>
           <Typography variant="body2" color="text.secondary">
             現在位置: <strong>X={position_x.toFixed(0)}</strong>, <strong>Y={position_y.toFixed(0)}</strong>, 角度={position_angle.toFixed(0)}°
           </Typography>
         </Paper>
 
         <Stack direction="row" spacing={3} sx={{ mt: 3 }}>
-          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#2c3e50", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">壁</Typography></Stack>
-          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#3498db", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">登録地点</Typography></Stack>
-          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">通路</Typography></Stack>
-          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "#ecf0f1", border: "1px solid #bdc3c7", borderRadius: 0.5, backgroundImage: "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.25) 0, rgba(255, 0, 0, 0.25) 2px, transparent 2px, transparent 6px)" }} /><Typography variant="caption" color="text.secondary">衝突回避領域</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "grey.800", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">壁</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "primary.main", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">登録地点</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "grey.50", border: 1, borderColor: "divider", borderRadius: 0.5 }} /><Typography variant="caption" color="text.secondary">通路</Typography></Stack>
+          <Stack direction="row" alignItems="center" spacing={1}><Box sx={{ width: 16, height: 16, bgcolor: "grey.50", border: 1, borderColor: "divider", borderRadius: 0.5, backgroundImage: "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.25) 0, rgba(255, 0, 0, 0.25) 2px, transparent 2px, transparent 6px)" }} /><Typography variant="caption" color="text.secondary">衝突回避領域</Typography></Stack>
         </Stack>
       </Container>
     </Box>
