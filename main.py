@@ -18,6 +18,9 @@ import uvicorn
 import threading
 import queue
 import asyncio
+import cv2
+from pyzbar.pyzbar import decode, ZBarSymbol
+
 
 SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
@@ -505,8 +508,40 @@ def move_linear(status):
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
 
+def get_code39_value(camera_id=0, timeout_sec=25):
+    cap = cv2.VideoCapture(camera_id)
+    if not cap.isOpened():
+        print("Error: カメラを起動できませんでした。")
+        return None
+    SCAN_RATIO = 0.3 
+    start_time = time.time()
+    try:
+        while True:
+            if timeout_sec is not None:
+                if (time.time() - start_time) > timeout_sec:
+                    print("Timeout: バーコードが見つかりませんでした。")
+                    return None
+            ret, frame = cap.read()
+            if not ret:
+                continue # 画像が取れない場合は次のフレームへ
+            height, width = frame.shape[:2]
+            scan_h = int(height * SCAN_RATIO)
+            center_y = height // 2
+            top_y = center_y - (scan_h // 2)
+            bottom_y = center_y + (scan_h // 2)
+            roi_img = frame[top_y:bottom_y, 0:width]
+
+            barcodes = decode(roi_img, symbols=[ZBarSymbol.CODE39])
+
+            if len(barcodes) > 0:
+                detected_value = barcodes[0].data.decode('utf-8')
+                return detected_value
+    finally:
+        cap.release()
+
 def get_table(table_name : str):
-    
+    move_linear(1)
+    table_id = get_code39_value()
     
     return 1
 
