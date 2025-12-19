@@ -162,7 +162,8 @@ class RobotState:
 
     def update(self, bno_raw_heading, pmw_raw_dx, pmw_raw_dy):
         if bno_raw_heading is not None:
-            corrected_heading = bno_raw_heading - ROBOT_CONFIG["bno_offset_deg"]
+            #bno_raw_headingの符号が逆？なのでマイナスをつけてみる
+            corrected_heading = -bno_raw_heading - ROBOT_CONFIG["bno_offset_deg"]
             self.heading = corrected_heading % 360
 
         rot_rad = math.radians(ROBOT_CONFIG["pmw_rotation_deg"])
@@ -180,7 +181,7 @@ class RobotState:
         sin_map = math.sin(map_rad)
         cos_map = math.cos(map_rad)
 
-        # === 修正箇所 ここから ===
+        # === 修正箇所 ここから ===0uuu
         # 0度(北)は画面上方向(Yマイナス)なので、前進成分(cos)にマイナスを掛けます
         
         # X軸変位: 前進 × sin(θ) + 横移動 × cos(θ)
