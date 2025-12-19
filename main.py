@@ -505,6 +505,12 @@ def move_linear(status):
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
 
+def get_table(table_name : str):
+    
+    
+    return 1
+
+
 app = FastAPI()
 
 robot = None
@@ -843,6 +849,7 @@ def main():
                 set_motor_speed(manual_left, manual_right,False,EB)
                 move_linear(manual_linear)
                 time.sleep(0.05)
+                move_queue.get() #マニュアル中はキューを受け付けない
                 continue
             
             time.sleep(0.05)
