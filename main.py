@@ -507,42 +507,72 @@ def move_linear(status):
     else: 
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
+import cv2
+import time
+from pyzbar.pyzbar import decode, ZBarSymbol
 
-def get_code39_value(camera_id=0, timeout_sec=25):
+def get_jan_code_value(camera_id=0, timeout_sec=25):
     cap = cv2.VideoCapture(camera_id)
     if not cap.isOpened():
         print("Error: カメラを起動できませんでした。")
         return None
+
     SCAN_RATIO = 0.3 
     start_time = time.time()
+    
     try:
         while True:
             if timeout_sec is not None:
                 if (time.time() - start_time) > timeout_sec:
                     print("Timeout: バーコードが見つかりませんでした。")
                     return None
+
             ret, frame = cap.read()
             if not ret:
-                continue # 画像が取れない場合は次のフレームへ
+                continue
+
             height, width = frame.shape[:2]
+            
+            # 画面中央の切り抜き処理
             scan_h = int(height * SCAN_RATIO)
             center_y = height // 2
             top_y = center_y - (scan_h // 2)
             bottom_y = center_y + (scan_h // 2)
             roi_img = frame[top_y:bottom_y, 0:width]
 
-            barcodes = decode(roi_img, symbols=[ZBarSymbol.CODE39])
+            # --- 変更点 ---
+            # Code39 ではなく、EAN13 (通常のJAN) と EAN8 (短縮JAN) を指定
+            barcodes = decode(roi_img, symbols=[ZBarSymbol.EAN13, ZBarSymbol.EAN8])
 
             if len(barcodes) > 0:
                 detected_value = barcodes[0].data.decode('utf-8')
                 return detected_value
+                
     finally:
         cap.release()
 
 def get_table(table_name : str):
     move_linear(1)
-    table_id = get_code39_value()
-    
+    table_id = get_jan_code_value()
+    if(table_id == None):
+        print("テーブルが発見できませんでした。")
+    else:
+        #テーブルを発見したら停止
+        move_linear(0)
+        time.sleep(0.5)
+        #少し下に下がり天板の下に行く
+        move_linear(-1)
+        time.sleep(2)
+        move_linear(0)
+        #スライド部展開
+        arduino.send_command('o')
+        time.sleep(5)
+        move_linear(1)
+        time.sleep(3)
+        arduino.send_command('c')
+        time.sleep(5)
+        move_linear(0)
+        time.sleep(24)
     return 1
 
 
