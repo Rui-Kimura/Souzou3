@@ -567,12 +567,13 @@ def get_table(table_name : str):
         #スライド部展開
         arduino.send_command('o')
         time.sleep(5)
-        move_linear(1)
+        move_linear(3)
         time.sleep(3)
         arduino.send_command('c')
         time.sleep(5)
-        move_linear(0)
+        move_linear(-1)
         time.sleep(24)
+        move_linear(0)
     return 1
 
 
