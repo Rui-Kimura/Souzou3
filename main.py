@@ -553,6 +553,9 @@ def get_table(table_name : str):
     table_id = get_jan_code_value()
     if(table_id == None):
         print("テーブルが発見できませんでした。")
+        move_linear(-1)
+        time.sleep(25)
+        move_linear(0)
     else:
         #テーブルを発見したら停止
         move_linear(0)
@@ -631,6 +634,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     manual_linear = -1
                 else:
                     manual_linear = 0
+                print(f"Linear Command Received: {mode}")
 
             elif msg_type == "slide":
                 mode = message["mode"]
@@ -647,7 +651,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.get("/")
 async def root():
-    return {"message":"Hello! I'm MoFeL Real Robot!"}
+    return {"message":"Hello! I'm MoFeL!"}
 
 @app.get("/position")
 async def position():
