@@ -533,15 +533,12 @@ def get_jan_code_value(camera_id=0, timeout_sec=25):
 
             height, width = frame.shape[:2]
             
-            # 画面中央の切り抜き処理
             scan_h = int(height * SCAN_RATIO)
             center_y = height // 2
             top_y = center_y - (scan_h // 2)
             bottom_y = center_y + (scan_h // 2)
             roi_img = frame[top_y:bottom_y, 0:width]
 
-            # --- 変更点 ---
-            # Code39 ではなく、EAN13 (通常のJAN) と EAN8 (短縮JAN) を指定
             barcodes = decode(roi_img, symbols=[ZBarSymbol.EAN13, ZBarSymbol.EAN8])
 
             if len(barcodes) > 0:
@@ -829,6 +826,11 @@ def slide_move(mode:str):
 
     return {"slide": mode}
 
+@app.get("/get_table")
+def _get_table(id:str):
+    get_table(id)
+    return {"table_id": id}
+    
 
 def main():
     try:
