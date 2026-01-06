@@ -4,6 +4,8 @@ import { Box } from "@mui/material";
 import mofelImg from "../res/mofel.png";
 
 export default function Home() {
+  
+
   return (
     <Box
       sx={{
