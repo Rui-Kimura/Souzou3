@@ -6,6 +6,7 @@ import numpy as np
 import heapq
 import math
 import os
+import subprocess
 import json
 from pmw3901 import PMW3901
 import serial
@@ -651,6 +652,36 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+@app.get("/shutdown")
+def shutdown():
+    os.system("sudo shutdown -h now")
+    return {}
+
+@app.get("/version")
+def get_version():
+    try:
+        cmd = [
+            'git',
+            'log',
+            '-1',
+            '--date=format:%Y.%m.%d.%H.%M.%S',
+            '--format=%cd.%h'
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True, 
+            text=True,           
+            check=True           
+        )
+
+        return result.stdout.strip()
+
+    except subprocess.CalledProcessError:
+        return "error"
+    except FileNotFoundError:
+        return "error"
 
 @app.get("/")
 async def root():

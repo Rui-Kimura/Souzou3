@@ -17,6 +17,12 @@ import {
   Tooltip,
   Snackbar,
   Alert,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
 
 import {
@@ -25,6 +31,7 @@ import {
   ContentCopy as CopyIcon,
   Refresh as RefreshIcon,
   Settings as SettingsIcon,
+  PowerSettingsNew as PowerIcon, 
 } from '@mui/icons-material';
 
 interface SettingItem {
@@ -43,8 +50,11 @@ interface SettingSection {
 
 export default function SettingsPage() {
   const [ipAddress, setIpAddress] = useState<string>('---.---.---.---');
+  const [version, setVersion] = useState<string>("0.0")
   const [loadingIp, setLoadingIp] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  
+  const [shutdownDialogOpen, setShutdownDialogOpen] = useState(false);
 
   const fetchIpAddress = async () => {
     setLoadingIp(true);
@@ -60,13 +70,33 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchVersion = async () => {
+    try {
+      const res = await fetch('/api/local/version');
+      const data = await res.json();
+      setVersion(data);
+    } catch (error) {
+      setIpAddress(' error');
+    }
+  }
+
   useEffect(() => {
     fetchIpAddress();
+    fetchVersion();
   }, []);
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setSnackbarOpen(true);
+  };
+
+  const executeShutdown = async () => {
+    setShutdownDialogOpen(false);
+    try {
+      await fetch('/api/local/shutdown');
+    } catch (error) {
+      console.error('Shutdown request failed', error);
+    }
   };
 
   const settingsConfig: SettingSection[] = [
@@ -102,8 +132,31 @@ export default function SettingsPage() {
         {
           id: 'version',
           label: 'バージョン',
-          value: 'v0.114.514.810.1919',
+          value: 'v'+ version,
           icon: <InfoIcon />,
+        },
+      ],
+    },
+    // 追加: システムセクション
+    {
+      title: 'システム',
+      items: [
+        {
+          id: 'shutdown',
+          label: 'シャットダウン',
+          value: '',
+          icon: <PowerIcon color="error" />, 
+          action: (
+            <Button 
+              variant="contained" 
+              color="error" 
+              size="small" 
+              onClick={() => setShutdownDialogOpen(true)}
+              startIcon={<PowerIcon />}
+            >
+              実行
+            </Button>
+          ),
         },
       ],
     },
@@ -149,11 +202,11 @@ export default function SettingsPage() {
                                <CircularProgress size={16} sx={{ mr: 1, color: 'primary.main' }} />
                                <Typography component="span" variant="caption">取得中...</Typography>
                             </Box>
-                          ) : (
+                          ) : item.value ? ( 
                             <Typography component="span" variant="body1" sx={{ fontWeight: 500, mt: 0.5, display: 'block' }}>
                               {item.value}
                             </Typography>
-                          )
+                          ) : null
                         }
                       />
                     </ListItem>
@@ -175,6 +228,32 @@ export default function SettingsPage() {
           クリップボードにコピーしました
         </Alert>
       </Snackbar>
+
+      <Dialog
+        open={shutdownDialogOpen}
+        onClose={() => setShutdownDialogOpen(false)}
+        aria-labelledby="shutdown-dialog-title"
+        aria-describedby="shutdown-dialog-description"
+      >
+        <DialogTitle id="shutdown-dialog-title">
+          システムのシャットダウン
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="shutdown-dialog-description">
+            本当にシステムをシャットダウンしますか？<br />
+            この操作は取り消せません。
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShutdownDialogOpen(false)} color="primary">
+            キャンセル
+          </Button>
+          <Button onClick={executeShutdown} color="error" variant="contained" autoFocus>
+            はい
+          </Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   );
 }
