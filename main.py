@@ -90,6 +90,11 @@ class Point(BaseModel):
     y: float
     angle: float
 
+class TableItem(BaseModel):
+    id: str
+    name: str
+    memo: str
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -548,7 +553,7 @@ def get_jan_code_value(camera_id=0, timeout_sec=25):
     finally:
         cap.release()
 
-def get_table(table_name : str):
+def pick_table(table_name : str):
     move_linear(1)
     table_id = get_jan_code_value()
     if(table_id == None):
@@ -556,6 +561,7 @@ def get_table(table_name : str):
         move_linear(-1)
         time.sleep(25)
         move_linear(0)
+        return -1
     else:
         #テーブルを発見したら停止
         move_linear(0)
@@ -831,9 +837,14 @@ def slide_move(mode:str):
 
     return {"slide": mode}
 
-@app.get("/get_table")
-def _get_table(id:str):
-    get_table(id)
+@app.get("/table_data")
+def _table_data():
+
+    return
+
+@app.get("/pick_table")
+def _pick_table(id:str):
+    pick_table(id)
     return {"table_id": id}
     
 
