@@ -21,7 +21,6 @@ import asyncio
 import cv2
 from pyzbar.pyzbar import decode, ZBarSymbol
 
-
 SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
 MAP_DATA_PATH = "room.dat"
@@ -512,9 +511,6 @@ def move_linear(status):
     else: 
         GPIO.output(LINEAR_IN1, GPIO.LOW)
         GPIO.output(LINEAR_IN2, GPIO.LOW)
-import cv2
-import time
-from pyzbar.pyzbar import decode, ZBarSymbol
 
 def get_jan_code_value(camera_id=0, timeout_sec=25):
     cap = cv2.VideoCapture(camera_id)

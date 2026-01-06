@@ -14,6 +14,7 @@ import {
 import { alpha } from '@mui/material/styles';
 import Map from '@/components/Map'
 
+
 interface Point {
     name: string,
     x: number;
