@@ -27,12 +27,13 @@ from pyzbar.pyzbar import decode, ZBarSymbol
 import smbus2
 
 # ==========================================
-# Custom I2C Class for I2C-6
+# Custom I2C Class for I2C-6 (Corrected)
 # ==========================================
 class I2C6_Wrapper:
     """
     adafruit_bno055などが期待するI2Cインターフェースを
     smbus2を使ってI2C-6で再現するラッパークラス
+    (writeto_then_readfromを追加)
     """
     def __init__(self, bus_id=6):
         self.bus = smbus2.SMBus(bus_id)
@@ -58,6 +59,32 @@ class I2C6_Wrapper:
         read_data = list(msg)
         for i in range(len(buffer)):
             buffer[i] = read_data[i]
+
+    def writeto_then_readfrom(self, address, out_buffer, in_buffer, out_start=0, out_end=None, in_start=0, in_end=None, stop=True):
+        """
+        書き込み後に読み込みを行う（Combined Transaction）
+        レジスタ指定して値を読む際などに必須
+        """
+        if out_end is None:
+            out_end = len(out_buffer)
+        if in_end is None:
+            in_end = len(in_buffer)
+
+        # 書き込みデータの準備
+        data_to_write = list(out_buffer[out_start:out_end])
+        write_msg = smbus2.i2c_msg.write(address, data_to_write)
+
+        # 読み込みデータの準備
+        read_len = in_end - in_start
+        read_msg = smbus2.i2c_msg.read(address, read_len)
+
+        # 一括実行（i2c_rdwrに複数のmsgを渡すと連続実行される）
+        self.bus.i2c_rdwr(write_msg, read_msg)
+
+        # 結果をin_bufferに格納
+        read_data = list(read_msg)
+        for i in range(read_len):
+            in_buffer[in_start + i] = read_data[i]
 
 # ==========================================
 # Constants & Configuration
