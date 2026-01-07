@@ -8,10 +8,10 @@ import subprocess
 import threading
 import time
 from typing import List, Optional
+from contextlib import asynccontextmanager
 
 import adafruit_bno055
 import board
-import busio
 import cv2
 import numpy as np
 import RPi.GPIO as GPIO
@@ -22,6 +22,42 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from pmw3901 import PMW3901
 from pyzbar.pyzbar import decode, ZBarSymbol
+
+# I2C-6を直接扱うためのライブラリ
+import smbus2
+
+# ==========================================
+# Custom I2C Class for I2C-6
+# ==========================================
+class I2C6_Wrapper:
+    """
+    adafruit_bno055などが期待するI2Cインターフェースを
+    smbus2を使ってI2C-6で再現するラッパークラス
+    """
+    def __init__(self, bus_id=6):
+        self.bus = smbus2.SMBus(bus_id)
+
+    def try_lock(self):
+        # シングルスレッド/プロセスの簡易実装として常にTrueを返す
+        return True
+
+    def unlock(self):
+        pass
+
+    def writeto(self, address, buffer, stop=True):
+        # bufferをリストに変換して書き込み
+        data = list(buffer)
+        msg = smbus2.i2c_msg.write(address, data)
+        self.bus.i2c_rdwr(msg)
+
+    def readfrom_into(self, address, buffer, stop=True):
+        # バッファサイズ分だけ読み込み
+        msg = smbus2.i2c_msg.read(address, len(buffer))
+        self.bus.i2c_rdwr(msg)
+        # 読み込んだデータをbufferに書き戻す
+        read_data = list(msg)
+        for i in range(len(buffer)):
+            buffer[i] = read_data[i]
 
 # ==========================================
 # Constants & Configuration
@@ -661,7 +697,6 @@ def pick_table(table_name: str):
 # ==========================================
 # FastAPI Setup & Handlers
 # ==========================================
-app = FastAPI()
 
 async def broadcast_position_task():
     while True:
@@ -676,9 +711,14 @@ async def broadcast_position_task():
                 }
                 await manager.broadcast(json.dumps(data))
 
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup event
     asyncio.create_task(broadcast_position_task())
+    yield
+    # Shutdown event (if needed) goes here
+
+app = FastAPI(lifespan=lifespan)
 
 @app.middleware("http")
 async def add_cors_header(request: Request, call_next):
@@ -991,7 +1031,10 @@ def pick_table_api(id:str):
 def main():
     try:
         setup_hardware()
-        i2c = busio.I2C(board.D23, board.D22)
+        
+        # 修正箇所: ライブラリに頼らず自作クラスでI2C-6を指定
+        i2c = I2C6_Wrapper(bus_id=6)
+        
         bno = adafruit_bno055.BNO055_I2C(i2c, address=0x29)
         if os.path.exists(PROFILE_FILE):
             with open(PROFILE_FILE, "r") as f:
