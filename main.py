@@ -27,44 +27,46 @@ from pyzbar.pyzbar import decode, ZBarSymbol
 import smbus2
 
 # ==========================================
-# Custom I2C Class for I2C-6 (Corrected)
+# Custom I2C Class for I2C-6 (Final Fix)
 # ==========================================
 class I2C6_Wrapper:
     """
     adafruit_bno055などが期待するI2Cインターフェースを
     smbus2を使ってI2C-6で再現するラッパークラス
-    (writeto_then_readfromを追加)
+    (writeto/readfrom_intoにstart/end引数を追加)
     """
     def __init__(self, bus_id=6):
         self.bus = smbus2.SMBus(bus_id)
 
     def try_lock(self):
-        # シングルスレッド/プロセスの簡易実装として常にTrueを返す
         return True
 
     def unlock(self):
         pass
 
-    def writeto(self, address, buffer, stop=True):
-        # bufferをリストに変換して書き込み
-        data = list(buffer)
+    def writeto(self, address, buffer, start=0, end=None, stop=True):
+        if end is None:
+            end = len(buffer)
+        # 指定された範囲をスライスして送信
+        data = list(buffer[start:end])
         msg = smbus2.i2c_msg.write(address, data)
         self.bus.i2c_rdwr(msg)
 
-    def readfrom_into(self, address, buffer, stop=True):
-        # バッファサイズ分だけ読み込み
-        msg = smbus2.i2c_msg.read(address, len(buffer))
+    def readfrom_into(self, address, buffer, start=0, end=None, stop=True):
+        if end is None:
+            end = len(buffer)
+        read_len = end - start
+        
+        # 指定サイズ分読み込む
+        msg = smbus2.i2c_msg.read(address, read_len)
         self.bus.i2c_rdwr(msg)
-        # 読み込んだデータをbufferに書き戻す
+        
+        # 結果をバッファの指定位置に書き戻す
         read_data = list(msg)
-        for i in range(len(buffer)):
-            buffer[i] = read_data[i]
+        for i in range(read_len):
+            buffer[start + i] = read_data[i]
 
     def writeto_then_readfrom(self, address, out_buffer, in_buffer, out_start=0, out_end=None, in_start=0, in_end=None, stop=True):
-        """
-        書き込み後に読み込みを行う（Combined Transaction）
-        レジスタ指定して値を読む際などに必須
-        """
         if out_end is None:
             out_end = len(out_buffer)
         if in_end is None:
@@ -78,7 +80,7 @@ class I2C6_Wrapper:
         read_len = in_end - in_start
         read_msg = smbus2.i2c_msg.read(address, read_len)
 
-        # 一括実行（i2c_rdwrに複数のmsgを渡すと連続実行される）
+        # 一括実行
         self.bus.i2c_rdwr(write_msg, read_msg)
 
         # 結果をin_bufferに格納
