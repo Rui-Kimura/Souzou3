@@ -1,50 +1,56 @@
-import RPi.GPIO as GPIO
-import time
-import board
-import adafruit_bno055
-import numpy as np
+import asyncio
 import heapq
+import json
 import math
 import os
+import queue
 import subprocess
-import json
-from pmw3901 import PMW3901
+import threading
+import time
+from typing import List, Optional
+
+import adafruit_bno055
+import board
+import busio
+import cv2
+import numpy as np
+import RPi.GPIO as GPIO
 import serial
 import serial.tools.list_ports
-
+import uvicorn
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
-from typing import List, Optional
-import uvicorn
-import threading
-import queue
-import asyncio
-import cv2
+from pmw3901 import PMW3901
 from pyzbar.pyzbar import decode, ZBarSymbol
 
+# ==========================================
+# Constants & Configuration
+# ==========================================
 SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
 MAP_DATA_PATH = "room.dat"
+TABLE_DATA_FILE = "tables.dat"
 PROFILE_FILE = "bno_profile.json"
 CONFIG_FILE = "robot_config.json"
 
-GRID_SIZE_MM = 50.0      
-ROBOT_WIDTH_MM = 400.0   
-ROBOT_DEPTH_MM = 350.0   
-INFLATION_RADIUS = 6     
+GRID_SIZE_MM = 50.0
+ROBOT_WIDTH_MM = 400.0
+ROBOT_DEPTH_MM = 350.0
+INFLATION_RADIUS = 6
 
 BASE_SPEED = 90.0
-KP_DIST = 1.5  
-KP_TURN = 1.2  
-TURN_THRESHOLD_DEG = 3.0 
-DIST_THRESHOLD_MM = 40.0 
+KP_DIST = 1.5
+KP_TURN = 1.2
+TURN_THRESHOLD_DEG = 3.0
+DIST_THRESHOLD_MM = 40.0
 
+# GPIO Pins
 L_EN = 19
-IN1 = 21 
-IN2 = 20 
+IN1 = 21
+IN2 = 20
 R_EN = 26
-IN3 = 16 
-IN4 = 12 
+IN3 = 16
+IN4 = 12
 FREQ = 100
 
 LINEAR_IN1 = 5
@@ -52,6 +58,53 @@ LINEAR_IN2 = 6
 
 SENSOR_HEIGHT_MM = 95.0
 
+# Command Constants
+AUTOMOVE = 1
+PICKTABLE = 2
+
+# ==========================================
+# Data Models
+# ==========================================
+class Point(BaseModel):
+    name: str
+    x: float
+    y: float
+    angle: float
+
+class TableItem(BaseModel):
+    id: str
+    name: str
+    memo: str
+
+# ==========================================
+# Global Variables
+# ==========================================
+target_pose = (1000.0, 1000.0, 0.0)
+
+manual_control = False
+manual_speed = 0.0
+manual_direction = 0.0
+manual_angle = 0.0
+manual_rotate = False
+manual_linear = 0
+
+move_queue = queue.Queue()
+
+planner = None
+robot = None
+position_lock = threading.Lock()
+holding_table_id = None
+reserved_table_id = None
+
+# PWM Objects
+pwm1 = None
+pwm2 = None
+pwm3 = None
+pwm4 = None
+
+# ==========================================
+# Utility Functions
+# ==========================================
 def load_robot_config():
     default_config = {
         "pmw_rotation_deg": 0.0,
@@ -68,33 +121,31 @@ def load_robot_config():
 
 ROBOT_CONFIG = load_robot_config()
 
-target_pose = (1000.0, 1000.0, 0.0)
+def pos_to_grid(x_mm, y_mm):
+    return int(x_mm / GRID_SIZE_MM), int(y_mm / GRID_SIZE_MM)
 
-manual_control = False
-manual_speed = 0.0
-manual_direction = 0.0
-manual_angle = 0.0
-manual_rotate = False
-manual_linear = 0
+def grid_to_pos_center(gx, gy):
+    return gx * GRID_SIZE_MM + GRID_SIZE_MM / 2.0, gy * GRID_SIZE_MM + GRID_SIZE_MM / 2.0
 
-move_queue = queue.Queue()
-AUTOMOVE = 1
+def normalize_angle_diff(target_deg, current_deg):
+    return (target_deg - current_deg + 180) % 360 - 180
 
-planner = None
-robot = None
-position_lock = threading.Lock()
+def load_data_from_file() -> List[dict]:
+    if not os.path.exists(TABLE_DATA_FILE):
+        return []
+    try:
+        with open(TABLE_DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return []
 
-class Point(BaseModel):
-    name: str
-    x: float
-    y: float
-    angle: float
+def save_data_to_file(data: List[dict]):
+    with open(TABLE_DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
-class TableItem(BaseModel):
-    id: str
-    name: str
-    memo: str
-
+# ==========================================
+# Classes
+# ==========================================
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
@@ -170,7 +221,6 @@ class RobotState:
 
     def update(self, bno_raw_heading, pmw_raw_dx, pmw_raw_dy):
         if bno_raw_heading is not None:
-            #bno_raw_headingの符号が逆？なのでマイナスをつけてみる
             corrected_heading = -bno_raw_heading - ROBOT_CONFIG["bno_offset_deg"]
             self.heading = corrected_heading % 360
 
@@ -189,22 +239,14 @@ class RobotState:
         sin_map = math.sin(map_rad)
         cos_map = math.cos(map_rad)
 
-        # === 修正箇所 ここから ===0uuu
-        # 0度(北)は画面上方向(Yマイナス)なので、前進成分(cos)にマイナスを掛けます
-        
-        # X軸変位: 前進 × sin(θ) + 横移動 × cos(θ)
         dx_global = dist_fwd * sin_map + dist_side * cos_map
-        
-        # Y軸変位: -前進 × cos(θ) + 横移動 × sin(θ)
         dy_global = -dist_fwd * cos_map + dist_side * sin_map
 
         self.x += dx_global
-        self.y += dy_global # ここは単純加算に変更
-        # === 修正箇所 ここまで ===
+        self.y += dy_global
 
     def get_grid_pos(self):
-        return int(self.x / GRID_SIZE_MM), int(self.y / GRID_SIZE_MM)
-
+        return pos_to_grid(self.x, self.y)
 
 class PathPlanner:
     def __init__(self, raw_map, inflation_r):
@@ -233,9 +275,8 @@ class PathPlanner:
         abs_x = cx + tx
         abs_y = cy + ty
         
-        c = int(abs_x / GRID_SIZE_MM)
-        r = int(abs_y / GRID_SIZE_MM)
-        return r, c
+        gx, gy = pos_to_grid(abs_x, abs_y)
+        return gy, gx
 
     def _create_cost_map(self, include_stocker=True):
         rows, cols = self.grid.shape
@@ -363,11 +404,13 @@ class PathPlanner:
         path.reverse()
         return path
 
-
-p1, p2, p3, p4 = None, None, None, None
+# ==========================================
+# Hardware Control Functions
+# ==========================================
+arduino = ArduinoController()
 
 def setup_hardware():
-    global p1, p2, p3, p4
+    global pwm1, pwm2, pwm3, pwm4
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BCM)
     pins = [IN1, IN2, IN3, IN4, L_EN, R_EN, LINEAR_IN1, LINEAR_IN2]
@@ -375,26 +418,53 @@ def setup_hardware():
         GPIO.setup(pin, GPIO.OUT)
         GPIO.output(pin, GPIO.LOW)
     
-    p1 = GPIO.PWM(IN1, FREQ); p2 = GPIO.PWM(IN2, FREQ)
-    p3 = GPIO.PWM(IN3, FREQ); p4 = GPIO.PWM(IN4, FREQ)
+    pwm1 = GPIO.PWM(IN1, FREQ)
+    pwm2 = GPIO.PWM(IN2, FREQ)
+    pwm3 = GPIO.PWM(IN3, FREQ)
+    pwm4 = GPIO.PWM(IN4, FREQ)
     GPIO.output(L_EN, GPIO.HIGH)
     GPIO.output(R_EN, GPIO.HIGH)
     
-    p1.start(0); p2.start(0); p3.start(0); p4.start(0)
+    pwm1.start(0)
+    pwm2.start(0)
+    pwm3.start(0)
+    pwm4.start(0)
 
-def set_motor_speed(left_speed, right_speed, rotate=False, brake=False,):
-    if(brake == True):
-        p1.ChangeDutyCycle(100); p2.ChangeDutyCycle(100)
-        p3.ChangeDutyCycle(100); p4.ChangeDutyCycle(100)
+def set_motor_speed(left_speed, right_speed, rotate=False, brake=False):
+    if brake:
+        pwm1.ChangeDutyCycle(100)
+        pwm2.ChangeDutyCycle(100)
+        pwm3.ChangeDutyCycle(100)
+        pwm4.ChangeDutyCycle(100)
         return
     
-    l = max(-100, min(100, left_speed))
-    r = max(-100, min(100, right_speed))
+    left_duty = max(-100, min(100, left_speed))
+    right_duty = max(-100, min(100, right_speed))
     
-    if l > 0: p1.ChangeDutyCycle(l); p2.ChangeDutyCycle(0)
-    else: p1.ChangeDutyCycle(0); p2.ChangeDutyCycle(abs(l))
-    if r > 0: p3.ChangeDutyCycle(r); p4.ChangeDutyCycle(0)
-    else: p3.ChangeDutyCycle(0); p4.ChangeDutyCycle(abs(r))
+    if left_duty > 0:
+        pwm1.ChangeDutyCycle(left_duty)
+        pwm2.ChangeDutyCycle(0)
+    else:
+        pwm1.ChangeDutyCycle(0)
+        pwm2.ChangeDutyCycle(abs(left_duty))
+    
+    if right_duty > 0:
+        pwm3.ChangeDutyCycle(right_duty)
+        pwm4.ChangeDutyCycle(0)
+    else:
+        pwm3.ChangeDutyCycle(0)
+        pwm4.ChangeDutyCycle(abs(right_duty))
+
+def move_linear(status):
+    if status == 1:
+        GPIO.output(LINEAR_IN1, GPIO.LOW)
+        GPIO.output(LINEAR_IN2, GPIO.HIGH)
+    elif status == -1:
+        GPIO.output(LINEAR_IN1, GPIO.HIGH)
+        GPIO.output(LINEAR_IN2, GPIO.LOW)
+    else:
+        GPIO.output(LINEAR_IN1, GPIO.LOW)
+        GPIO.output(LINEAR_IN2, GPIO.LOW)
 
 def get_bno_heading(sensor):
     for _ in range(5):
@@ -417,101 +487,6 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
             robot_instance.update(h, dx, dy)
         
         time.sleep(0.02)
-
-def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
-    target_x_mm, target_y_mm, target_angle = target_pos_mm
-    
-    goal_grid_x = int(target_x_mm / GRID_SIZE_MM)
-    goal_grid_y = int(target_y_mm / GRID_SIZE_MM)
-    goal_grid = (goal_grid_x, goal_grid_y)
-
-    with position_lock:
-        start_grid = robot.get_grid_pos()
-    
-    print(f"Start: {start_grid} -> Goal: {goal_grid}")
-    path = _planner.get_path_astar(start_grid, goal_grid)
-    
-    if not path:
-        print("経路なし")
-        return False
-    
-    state_turning = True 
-
-    for i in range(1, len(path)):
-        next_node = path[i]
-        
-        next_target_x_mm = next_node[0] * GRID_SIZE_MM + GRID_SIZE_MM/2
-        next_target_y_mm = next_node[1] * GRID_SIZE_MM + GRID_SIZE_MM/2
-        
-        if i == len(path) - 1:
-            next_target_x_mm = target_x_mm
-            next_target_y_mm = target_y_mm
-        
-        print(f"Next WP: ({next_target_x_mm:.0f}, {next_target_y_mm:.0f})")
-
-        while True:            
-            with position_lock:
-                cx = robot.x
-                cy = robot.y
-                ch = robot.heading
-
-            dx = next_target_x_mm - cx
-            dy = next_target_y_mm - cy
-            dist = math.sqrt(dx**2 + dy**2)
-            
-            if dist < DIST_THRESHOLD_MM:
-                set_motor_speed(0, 0)
-                break
-
-            target_rad = math.atan2(dx, -dy)
-            target_deg = math.degrees(target_rad)
-            if target_deg < 0: target_deg += 360
-
-            diff = (target_deg - ch + 180) % 360 - 180
-            if abs(diff) > 170:
-                print(f"U-Turn Mode: Diff={diff:.1f}")
-                set_motor_speed(70, -70) 
-                time.sleep(0.05)
-                continue
-            
-            if state_turning:
-                if abs(diff) < 10.0:
-                    state_turning = False
-                    set_motor_speed(0, 0)
-                    time.sleep(0.1)
-                else:
-                    turn_pow = KP_TURN * diff
-                    min_p = 80
-                    if turn_pow > 0: turn_pow = max(turn_pow, min_p)
-                    else: turn_pow = min(turn_pow, -min_p)
-                    set_motor_speed(-turn_pow, turn_pow)
-
-            else: 
-                if abs(diff) > 30.0:
-                    state_turning = True
-                    set_motor_speed(0, 0)
-                else:
-                    correction = diff * KP_DIST
-                    curr_base = BASE_SPEED
-                    l = curr_base - correction
-                    r = curr_base + correction
-                    set_motor_speed(l, r)
-            
-            time.sleep(0.05)
-
-    set_motor_speed(0, 0)
-    return True
-
-def move_linear(status):
-    if(status==1):  
-        GPIO.output(LINEAR_IN1, GPIO.LOW)
-        GPIO.output(LINEAR_IN2, GPIO.HIGH)
-    elif(status==-1): 
-        GPIO.output(LINEAR_IN1, GPIO.HIGH)
-        GPIO.output(LINEAR_IN2, GPIO.LOW)
-    else: 
-        GPIO.output(LINEAR_IN1, GPIO.LOW)
-        GPIO.output(LINEAR_IN2, GPIO.LOW)
 
 def get_jan_code_value(camera_id=0, timeout_sec=25):
     cap = cv2.VideoCapture(camera_id)
@@ -550,24 +525,128 @@ def get_jan_code_value(camera_id=0, timeout_sec=25):
     finally:
         cap.release()
 
-def pick_table(table_name : str):
+# ==========================================
+# Action & Navigation Logic
+# ==========================================
+def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
+    target_x_mm, target_y_mm, target_angle = target_pos_mm
+    
+    goal_grid = pos_to_grid(target_x_mm, target_y_mm)
+
+    with position_lock:
+        start_grid = robot.get_grid_pos()
+    
+    print(f"Start: {start_grid} -> Goal: {goal_grid}")
+    path = _planner.get_path_astar(start_grid, goal_grid)
+    
+    if not path:
+        print("経路なし")
+        return False
+    
+    state_turning = True 
+
+    for i in range(1, len(path)):
+        next_node = path[i]
+        
+        next_target_x_mm, next_target_y_mm = grid_to_pos_center(next_node[0], next_node[1])
+        
+        if i == len(path) - 1:
+            next_target_x_mm = target_x_mm
+            next_target_y_mm = target_y_mm
+        
+        print(f"Next WP: ({next_target_x_mm:.0f}, {next_target_y_mm:.0f})")
+
+        while True:            
+            with position_lock:
+                cx = robot.x
+                cy = robot.y
+                ch = robot.heading
+
+            dx = next_target_x_mm - cx
+            dy = next_target_y_mm - cy
+            dist = math.sqrt(dx**2 + dy**2)
+            
+            if dist < DIST_THRESHOLD_MM:
+                set_motor_speed(0, 0)
+                break
+
+            target_rad = math.atan2(dx, -dy)
+            target_deg = math.degrees(target_rad)
+            if target_deg < 0: target_deg += 360
+
+            diff = normalize_angle_diff(target_deg, ch)
+            if abs(diff) > 170:
+                print(f"U-Turn Mode: Diff={diff:.1f}")
+                set_motor_speed(70, -70) 
+                time.sleep(0.05)
+                continue
+            
+            if state_turning:
+                if abs(diff) < 10.0:
+                    state_turning = False
+                    set_motor_speed(0, 0)
+                    time.sleep(0.1)
+                else:
+                    turn_pow = KP_TURN * diff
+                    min_p = 80
+                    if turn_pow > 0: turn_pow = max(turn_pow, min_p)
+                    else: turn_pow = min(turn_pow, -min_p)
+                    set_motor_speed(-turn_pow, turn_pow)
+
+            else: 
+                if abs(diff) > 30.0:
+                    state_turning = True
+                    set_motor_speed(0, 0)
+                else:
+                    correction = diff * KP_DIST
+                    curr_base = BASE_SPEED
+                    l = curr_base - correction
+                    r = curr_base + correction
+                    set_motor_speed(l, r)
+            
+            time.sleep(0.05)
+
+    set_motor_speed(0, 0)
+    
+    print(f"Aligning to final angle: {target_angle:.1f}")
+    align_start_time = time.time()
+    while time.time() - align_start_time < 5.0:
+        with position_lock:
+            ch = robot.heading
+        
+        diff = normalize_angle_diff(target_angle, ch)
+        if abs(diff) < TURN_THRESHOLD_DEG:
+            break
+        
+        turn_pow = KP_TURN * diff
+        min_p = 80
+        if turn_pow > 0: turn_pow = max(turn_pow, min_p)
+        else: turn_pow = min(turn_pow, -min_p)
+        
+        turn_pow = max(-100, min(100, turn_pow))
+        
+        set_motor_speed(-turn_pow, turn_pow)
+        time.sleep(0.05)
+
+    set_motor_speed(0, 0)
+
+    return True
+
+def pick_table(table_name: str):
     move_linear(1)
     table_id = get_jan_code_value()
-    if(table_id == None):
+    if table_id is None:
         print("テーブルが発見できませんでした。")
         move_linear(-1)
         time.sleep(25)
         move_linear(0)
         return -1
     else:
-        #テーブルを発見したら停止
         move_linear(0)
         time.sleep(0.5)
-        #少し下に下がり天板の下に行く
         move_linear(-1)
         time.sleep(2)
         move_linear(0)
-        #スライド部展開
         arduino.send_command('o')
         time.sleep(5)
         move_linear(3)
@@ -579,11 +658,10 @@ def pick_table(table_name : str):
         move_linear(0)
     return 1
 
-
+# ==========================================
+# FastAPI Setup & Handlers
+# ==========================================
 app = FastAPI()
-
-robot = None
-arduino = ArduinoController()
 
 async def broadcast_position_task():
     while True:
@@ -687,15 +765,17 @@ def get_version():
 async def root():
     return {"message":"Hello! I'm MoFeL!"}
 
+# --- Position & Map API ---
+
 @app.get("/position")
-async def position():
+async def get_position():
     with position_lock:
         if robot:
             return {"x":robot.x,"y":robot.y,"angle":robot.heading}
         return {"x":0, "y":0,"angle":0}
 
 @app.get("/mapdata")
-async def mapdata():
+async def get_map_data():
     if planner:
         str_map = []
         for row in planner.grid:
@@ -704,7 +784,7 @@ async def mapdata():
     return{"mapdata": []}
 
 @app.get("/costmapdata")
-async def costmapdata(mode: str = "normal"):
+async def get_cost_map_data(mode: str = "normal"):
     if planner:
         target_map = None
         if mode == "base":
@@ -718,8 +798,10 @@ async def costmapdata(mode: str = "normal"):
         return {"costmapdata": cost_str_list}
     return {"costmapdata": []}
 
+# --- Target Point API ---
+
 @app.get("/saved_target_points")
-async def target_points():
+async def get_target_points():
     if os.path.exists(SAVED_POINTS_FILE):
         try:
             with open(SAVED_POINTS_FILE, mode='r', encoding='utf-8') as file:
@@ -768,7 +850,7 @@ def delete_target_point(name: str):
         return {"message": "error", "error": str(e)}
 
 @app.get("/target_point")
-async def target_point():
+async def get_target_point():
     return{
         "x" : target_pose[0],
         "y" : target_pose[1],
@@ -806,6 +888,8 @@ def get_stocker():
             return {"message": "error reading stocker"}
     return {"message": "no stocker set"}
 
+# --- Control & Action API ---
+
 @app.get("/automove_start")
 async def automove_start():
     move_queue.put(AUTOMOVE)
@@ -814,7 +898,7 @@ async def automove_start():
     }
 
 @app.get("/controll_api")
-def control_api(
+def control_robot_api(
     direction: int, 
     speed: float,       
     angle: float,
@@ -831,7 +915,7 @@ def control_api(
     }
 
 @app.get("/set_manual_mode")
-def manual_mode(mode:bool):
+def set_manual_mode_endpoint(mode:bool):
     global manual_control
     manual_control = bool(mode)
     return{
@@ -839,7 +923,7 @@ def manual_mode(mode:bool):
     }
 
 @app.get("/linear")
-def linear_move_api(mode:str):
+def set_linear_move_endpoint(mode:str):
     global manual_linear
     if(mode=="up"):
         manual_linear = 1
@@ -852,7 +936,7 @@ def linear_move_api(mode:str):
     }
 
 @app.get("/slide")
-def slide_move(mode:str):
+def set_slide_move_endpoint(mode:str):
     print(f"Slide Command Received: {mode}")
     
     if mode == "open":
@@ -865,20 +949,49 @@ def slide_move(mode:str):
     return {"slide": mode}
 
 @app.get("/table_data")
-def _table_data():
+def get_table_data_api():
+    data = load_data_from_file()
+    return data
 
-    return
+@app.post("/add_table_data")
+def add_table_data(item: TableItem):
+    current_data = load_data_from_file()
+    
+    is_updated = False
+    new_item_dict = item.model_dump() 
+
+    for index, existing_item in enumerate(current_data):
+        if existing_item["id"] == item.id:
+            current_data[index] = new_item_dict
+            is_updated = True
+            break
+    
+    if not is_updated:
+        current_data.append(new_item_dict)
+    
+    save_data_to_file(current_data)
+    
+    action = "updated" if is_updated else "created"
+    return {"message": f"Data successfully {action}", "data": item}
+
+@app.get("/table_now")
+def get_current_table_api():
+    return{"table_id":holding_table_id}
 
 @app.get("/pick_table")
-def _pick_table(id:str):
-    pick_table(id)
+def pick_table_api(id:str):        
+    move_queue.put(PICKTABLE)
+    global reserved_table_id
+    reserved_table_id = id
     return {"table_id": id}
-    
 
+# ==========================================
+# Main Loop
+# ==========================================
 def main():
     try:
         setup_hardware()
-        i2c = board.I2C()
+        i2c = busio.I2C(board.D23, board.D22)
         bno = adafruit_bno055.BNO055_I2C(i2c, address=0x29)
         if os.path.exists(PROFILE_FILE):
             with open(PROFILE_FILE, "r") as f:
@@ -933,30 +1046,30 @@ def main():
         api_thread.start()
         
         while True:
-            EB = False
-            while(manual_control):
-                if(manual_direction != 0 and not manual_rotate):
-                    if(manual_speed < 0):
+            electronic_brake = False
+            while manual_control:
+                if manual_direction != 0 and not manual_rotate:
+                    if manual_speed < 0:
                         manual_left = 0
                         manual_right = 0
-                        EB = True
-                    elif(manual_direction == 1 or manual_direction == -1):
-                        EB = False
-                        if(manual_angle > 0): 
+                        electronic_brake = True
+                    elif manual_direction == 1 or manual_direction == -1:
+                        electronic_brake = False
+                        if manual_angle > 0: 
                             manual_left = manual_direction * manual_speed * (100 - manual_angle)
                             manual_right = manual_direction * manual_speed * 100
-                        elif(manual_angle <= 0): 
+                        elif manual_angle <= 0: 
                             manual_left = manual_direction * manual_speed * 100
                             manual_right = manual_direction * manual_speed * (100 + manual_angle)
-                elif(manual_direction != 0 and manual_rotate): 
-                    EB = False
+                elif manual_direction != 0 and manual_rotate: 
+                    electronic_brake = False
                     manual_right = manual_direction * manual_speed * manual_angle
                     manual_left = -1 * manual_right
                 else:
                     manual_right = 0
                     manual_left = 0
 
-                set_motor_speed(manual_left, manual_right,False,EB)
+                set_motor_speed(manual_left, manual_right, False, electronic_brake)
                 move_linear(manual_linear)
                 time.sleep(0.05)
                 if not move_queue.empty():
@@ -965,13 +1078,42 @@ def main():
             
             time.sleep(0.05)
             
-            if(move_queue.qsize() > 0):
-                buf_queue = move_queue.get()
-                print("queue now")
-                print(move_queue.qsize())
-                if buf_queue == AUTOMOVE:
+            if move_queue.qsize() > 0:
+                current_task = move_queue.get()
+                if current_task == AUTOMOVE:
                     print("auto move start")
                     move_to_target(planner, robot, bno, pmw, target_pose)
+                if current_task == PICKTABLE and reserved_table_id != None:
+                    if os.path.exists(STOCKER_FILE):
+                        try:
+                            with open(STOCKER_FILE, 'r') as f:
+                                s_data = json.load(f)
+                                s_x = s_data['x']
+                                s_y = s_data['y']
+                                s_ang = s_data['angle']
+                            
+                            with position_lock:
+                                cx = robot.x
+                                cy = robot.y
+                                ch = robot.heading
+                            
+                            dist_sq = (cx - s_x)**2 + (cy - s_y)**2
+                            diff = normalize_angle_diff(s_ang, ch)
+                            
+                            is_at_pos = dist_sq < DIST_THRESHOLD_MM**2
+                            is_at_ang = abs(diff) < TURN_THRESHOLD_DEG
+                            
+                            if is_at_pos and is_at_ang:
+                                pick_table(reserved_table_id)
+                            else:
+                                move_to_target(planner, robot, bno, pmw, (s_x, s_y, s_ang))
+                                pick_table(reserved_table_id)
+                                
+                        except Exception as e:
+                            print(f"Pick Table Error: {e}")
+                            set_motor_speed(0, 0)
+                    else:
+                        print("Stocker not found")
 
     except KeyboardInterrupt:
         print("\n停止")
