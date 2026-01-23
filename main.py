@@ -702,6 +702,8 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     return True
 
 def pick_table(table_name: str):
+    arduino.send_command('g')
+    time.sleep(1)
     move_linear(1)
     table_id = get_jan_code_value()
     if table_id is None:
@@ -716,12 +718,19 @@ def pick_table(table_name: str):
         move_linear(-1)
         time.sleep(2)
         move_linear(0)
+        arduino.send_command('r')
         arduino.send_command('o')
         time.sleep(5)
         move_linear(3)
         time.sleep(3)
         arduino.send_command('c')
         time.sleep(5)
+        arduino.send_command('g')
+        time.sleep(1)
+        arduino.send_command('r')
+        time.sleep(1)
+        arduino.send_command('g')
+        time.sleep(1)
         move_linear(-1)
         time.sleep(24)
         move_linear(0)
