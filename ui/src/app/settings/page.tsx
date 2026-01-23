@@ -23,6 +23,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogActions,
+  Switch,
 } from '@mui/material';
 
 import {
@@ -31,7 +32,8 @@ import {
   ContentCopy as CopyIcon,
   Refresh as RefreshIcon,
   Settings as SettingsIcon,
-  PowerSettingsNew as PowerIcon, 
+  PowerSettingsNew as PowerIcon,
+  Gamepad as GamepadIcon,
 } from '@mui/icons-material';
 
 interface SettingItem {
@@ -53,6 +55,8 @@ export default function SettingsPage() {
   const [version, setVersion] = useState<string>("0.0")
   const [loadingIp, setLoadingIp] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
+  const [demoMode, setDemoMode] = useState<boolean>(false);
+  const [loadingDemoMode, setLoadingDemoMode] = useState<boolean>(false);
   
   const [shutdownDialogOpen, setShutdownDialogOpen] = useState(false);
 
@@ -80,9 +84,32 @@ export default function SettingsPage() {
     }
   }
 
+  const fetchDemoMode = async () => {
+    try {
+      const res = await fetch('/api/local/is_demo');
+      const data = await res.json();
+      setDemoMode(data);
+    } catch (error) {
+      console.error('Demo mode fetch failed', error);
+    }
+  };
+
+  const setDemoModeState = async (mode: boolean) => {
+    setLoadingDemoMode(true);
+    try {
+      await fetch(`/api/local/set_is_demo?mode=${mode}`);
+      setDemoMode(mode);
+    } catch (error) {
+      console.error('Demo mode set failed', error);
+    } finally {
+      setLoadingDemoMode(false);
+    }
+  };
+
   useEffect(() => {
     fetchIpAddress();
     fetchVersion();
+    fetchDemoMode();
   }, []);
 
   const handleCopy = (text: string) => {
@@ -141,6 +168,20 @@ export default function SettingsPage() {
     {
       title: 'システム',
       items: [
+        {
+          id: 'demo-mode',
+          label: 'デモモード',
+          value: demoMode ? 'オン' : 'オフ',
+          icon: <GamepadIcon />,
+          action: (
+            <Switch
+              checked={demoMode}
+              onChange={(e) => setDemoModeState(e.target.checked)}
+              disabled={loadingDemoMode}
+            />
+          ),
+          loading: loadingDemoMode,
+        },
         {
           id: 'shutdown',
           label: 'シャットダウン',

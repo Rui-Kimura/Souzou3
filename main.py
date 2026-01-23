@@ -91,6 +91,9 @@ class I2C6_Wrapper:
 # ==========================================
 # Constants & Configuration
 # ==========================================
+
+IS_DEMO = False
+
 SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
 MAP_DATA_PATH = "room.dat"
@@ -1055,9 +1058,21 @@ def pick_table_api(id:str):
     reserved_table_id = id
     return {"table_id": id}
 
+@app.get("/is_demo")
+def is_demo():
+    return IS_DEMO
+
+@app.get("/set_is_demo")
+def set_is_demo(mode: bool):
+    global IS_DEMO
+    IS_DEMO = mode
+    print(f"Demo Mode: {IS_DEMO}")
+    return {"demo_mode": IS_DEMO}
+
 # ==========================================
 # Main Loop
 # ==========================================
+
 def main():
     try:
         setup_hardware()
@@ -1119,15 +1134,15 @@ def main():
         api_thread.start()
         
         while True:
-            electronic_brake = False
+            EB = False
             while manual_control:
                 if manual_direction != 0 and not manual_rotate:
                     if manual_speed < 0:
                         manual_left = 0
                         manual_right = 0
-                        electronic_brake = True
+                        EB = True
                     elif manual_direction == 1 or manual_direction == -1:
-                        electronic_brake = False
+                        EB = False
                         if manual_angle > 0: 
                             manual_left = manual_direction * manual_speed * (100 - manual_angle)
                             manual_right = manual_direction * manual_speed * 100
@@ -1135,14 +1150,14 @@ def main():
                             manual_left = manual_direction * manual_speed * 100
                             manual_right = manual_direction * manual_speed * (100 + manual_angle)
                 elif manual_direction != 0 and manual_rotate: 
-                    electronic_brake = False
+                    EB = False
                     manual_right = manual_direction * manual_speed * manual_angle
                     manual_left = -1 * manual_right
                 else:
                     manual_right = 0
                     manual_left = 0
 
-                set_motor_speed(manual_left, manual_right, False, electronic_brake)
+                set_motor_speed(manual_left, manual_right, False, EB)
                 move_linear(manual_linear)
                 time.sleep(0.05)
                 if not move_queue.empty():
@@ -1175,8 +1190,9 @@ def main():
                             
                             is_at_pos = dist_sq < DIST_THRESHOLD_MM**2
                             is_at_ang = abs(diff) < TURN_THRESHOLD_DEG
-                            
-                            if is_at_pos and is_at_ang:
+                            if IS_DEMO:
+                                pick_table(reserved_table_id)
+                            elif (is_at_pos and is_at_ang):
                                 pick_table(reserved_table_id)
                             else:
                                 move_to_target(planner, robot, bno, pmw, (s_x, s_y, s_ang))
