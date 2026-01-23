@@ -372,8 +372,9 @@ class PathPlanner:
                         if 0 <= r < rows and 0 <= c < cols:
                             temp_obstacle_map[r][c] = 1
 
-                    for y_off in range(-150, 150, 50):
-                        stocker_safe_indices.append(self._to_grid(sx, sy, s_ang, 0, y_off))
+                    for x_off in [0, 50]:
+                        for y_off in range(-150, 150, 50):
+                            stocker_safe_indices.append(self._to_grid(sx, sy, s_ang, x_off, y_off))
 
             except Exception as e:
                 print(f"Stocker load error: {e}")
