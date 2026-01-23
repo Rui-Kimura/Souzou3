@@ -723,6 +723,7 @@ def pick_table(table_name: str):
         time.sleep(5)
         move_linear(1)
         time.sleep(1.5)
+        move_linear(0)
         arduino.send_command('c')
         time.sleep(5)
         arduino.send_command('g')
