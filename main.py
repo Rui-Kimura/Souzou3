@@ -7,7 +7,8 @@ import queue
 import subprocess
 import threading
 import time
-from typing import List, Optional
+from datetime import datetime
+from typing import List, Optional, Dict
 from contextlib import asynccontextmanager
 
 import adafruit_bno055
@@ -33,7 +34,6 @@ class I2C6_Wrapper:
     """
     adafruit_bno055などが期待するI2Cインターフェースを
     smbus2を使ってI2C-6で再現するラッパークラス
-    (writeto/readfrom_intoにstart/end引数を追加)
     """
     def __init__(self, bus_id=6):
         self.bus = smbus2.SMBus(bus_id)
@@ -47,7 +47,6 @@ class I2C6_Wrapper:
     def writeto(self, address, buffer, start=0, end=None, stop=True):
         if end is None:
             end = len(buffer)
-        # 指定された範囲をスライスして送信
         data = list(buffer[start:end])
         msg = smbus2.i2c_msg.write(address, data)
         self.bus.i2c_rdwr(msg)
@@ -56,12 +55,8 @@ class I2C6_Wrapper:
         if end is None:
             end = len(buffer)
         read_len = end - start
-        
-        # 指定サイズ分読み込む
         msg = smbus2.i2c_msg.read(address, read_len)
         self.bus.i2c_rdwr(msg)
-        
-        # 結果をバッファの指定位置に書き戻す
         read_data = list(msg)
         for i in range(read_len):
             buffer[start + i] = read_data[i]
@@ -71,19 +66,11 @@ class I2C6_Wrapper:
             out_end = len(out_buffer)
         if in_end is None:
             in_end = len(in_buffer)
-
-        # 書き込みデータの準備
         data_to_write = list(out_buffer[out_start:out_end])
         write_msg = smbus2.i2c_msg.write(address, data_to_write)
-
-        # 読み込みデータの準備
         read_len = in_end - in_start
         read_msg = smbus2.i2c_msg.read(address, read_len)
-
-        # 一括実行
         self.bus.i2c_rdwr(write_msg, read_msg)
-
-        # 結果をin_bufferに格納
         read_data = list(read_msg)
         for i in range(read_len):
             in_buffer[in_start + i] = read_data[i]
@@ -98,6 +85,7 @@ SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
 MAP_DATA_PATH = "room.dat"
 TABLE_DATA_FILE = "tables.dat"
+SCHEDULES_FILE = "schedules.dat"
 PROFILE_FILE = "bno_profile.json"
 CONFIG_FILE = "robot_config.json"
 
@@ -129,6 +117,7 @@ SENSOR_HEIGHT_MM = 95.0
 # Command Constants
 AUTOMOVE = 1
 PICKTABLE = 2
+SCHEDULE_ACTION = 3
 
 # ==========================================
 # Data Models
@@ -143,6 +132,14 @@ class TableItem(BaseModel):
     id: str
     name: str
     memo: str
+
+class ScheduleItem(BaseModel):
+    id: str
+    name: str
+    Day: str  # 例: "Monday"
+    time: str # 例: "14:30"
+    position: str # 変更: 座標オブジェクトではなく、saved_pointsのnameを指定
+    tableId: str
 
 # ==========================================
 # Global Variables
@@ -163,6 +160,9 @@ robot = None
 position_lock = threading.Lock()
 holding_table_id = None
 reserved_table_id = None
+
+scheduled_job_data = None
+last_scheduled_minute = ""
 
 # PWM Objects
 pwm1 = None
@@ -210,6 +210,32 @@ def load_data_from_file() -> List[dict]:
 def save_data_to_file(data: List[dict]):
     with open(TABLE_DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
+
+def load_schedules_from_file() -> List[dict]:
+    if not os.path.exists(SCHEDULES_FILE):
+        return []
+    try:
+        with open(SCHEDULES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return []
+
+def save_schedules_to_file(data: List[dict]):
+    with open(SCHEDULES_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+def get_saved_point_by_name(name: str):
+    if not os.path.exists(SAVED_POINTS_FILE):
+        return None
+    try:
+        with open(SAVED_POINTS_FILE, "r", encoding="utf-8") as f:
+            points = json.load(f)
+            for p in points:
+                if p.get("name") == name:
+                    return p
+    except:
+        pass
+    return None
 
 # ==========================================
 # Classes
@@ -597,7 +623,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
             mask_red = cv2.addWeighted(cv2.inRange(hsv, lower_red1, upper_red1), 1.0,
-                                       cv2.inRange(hsv, lower_red2, upper_red2), 1.0, 0)
+                                         cv2.inRange(hsv, lower_red2, upper_red2), 1.0, 0)
             mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
             mask_green = cv2.inRange(hsv, lower_green, upper_green)
 
@@ -780,6 +806,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     return True
 
 def return_table():
+    global holding_table_id
     if holding_table_id is None:
         return None
     FoundEmpty = find_empty_stock()
@@ -804,8 +831,8 @@ def return_table():
         move_linear(0)
         holding_table_id = None
 
-def pick_table(table_name: str):
-    if table_id == holding_table_id:
+def pick_table(target_table_id: str):
+    if target_table_id == holding_table_id:
         return holding_table_id
     arduino.send_command('g')
     time.sleep(1)
@@ -813,9 +840,9 @@ def pick_table(table_name: str):
         return_table()
     
     move_linear(1)
-    table_id = get_jan_code_value()
+    detected_id = get_jan_code_value()
     
-    if table_id is None:
+    if detected_id is None:
         print("テーブルが発見できませんでした。")
         move_linear(-1)
         time.sleep(25)
@@ -844,7 +871,7 @@ def pick_table(table_name: str):
         move_linear(-1)
         time.sleep(24)
         move_linear(0)
-    return table_id
+    return detected_id
 
 # ==========================================
 # FastAPI Setup & Handlers
@@ -1080,6 +1107,34 @@ def get_stocker():
             return {"message": "error reading stocker"}
     return {"message": "no stocker set"}
 
+# --- Schedule API (Modified) ---
+
+@app.get("/get_schedules")
+def get_schedules():
+    """保存されたスケジュール一覧を取得"""
+    return load_schedules_from_file()
+
+@app.post("/set_schedule")
+def set_schedule(item: ScheduleItem):
+    """スケジュールを追加または上書き保存"""
+    schedules = load_schedules_from_file()
+    new_data = item.dict()
+    is_updated = False
+    
+    for i, s in enumerate(schedules):
+        if s["id"] == item.id:
+            schedules[i] = new_data
+            is_updated = True
+            break
+    
+    if not is_updated:
+        schedules.append(new_data)
+        
+    save_schedules_to_file(schedules)
+    
+    action = "updated" if is_updated else "created"
+    return {"message": f"Schedule successfully {action}", "data": item}
+
 # --- Control & Action API ---
 
 @app.get("/automove_start")
@@ -1189,14 +1244,63 @@ def set_is_demo(mode: bool):
     return {"demo_mode": IS_DEMO}
 
 # ==========================================
+# Scheduler Logic
+# ==========================================
+def scheduler_loop():
+    """
+    1分ごとに時刻を確認し、スケジュールを実行キューに入れるスレッド関数
+    """
+    global scheduled_job_data, last_scheduled_minute
+
+    print("Scheduler thread started.")
+    while True:
+        try:
+            now = datetime.now()
+            current_day = now.strftime("%A") # Monday, Tuesday...
+            current_time = now.strftime("%H:%M") # 14:30
+            
+            # 同じ分に重複実行しないようにチェック
+            if current_time == last_scheduled_minute:
+                time.sleep(1)
+                continue
+
+            # ロボットが操作中(manual_control)や移動中(queue not empty)ならスケジュール実行しない
+            if manual_control or not move_queue.empty():
+                time.sleep(1)
+                continue
+
+            schedules = load_schedules_from_file()
+            
+            for sch in schedules:
+                # 曜日と時刻が一致するか
+                if sch["Day"] == current_day and sch["time"] == current_time:
+                    print(f"Schedule Matched: {sch['name']} at {current_time}")
+                    
+                    # 実行するジョブ情報をセット
+                    scheduled_job_data = sch
+                    
+                    # キューにスケジュール実行タスクを追加
+                    move_queue.put(SCHEDULE_ACTION)
+                    
+                    # 実行フラグ更新（この分はもう実行しない）
+                    last_scheduled_minute = current_time
+                    break
+                    
+            time.sleep(1) # CPU負荷軽減
+
+        except Exception as e:
+            print(f"Scheduler Error: {e}")
+            time.sleep(5)
+
+# ==========================================
 # Main Loop
 # ==========================================
 
 def main():
+    global holding_table_id, robot, planner
     try:
         setup_hardware()
         
-        # 修正箇所: ライブラリに頼らず自作クラスでI2C-6を指定
         i2c = I2C6_Wrapper(bus_id=6)
         
         bno = adafruit_bno055.BNO055_I2C(i2c, address=0x29)
@@ -1229,7 +1333,6 @@ def main():
         start_x_mm = start_x_grid * GRID_SIZE_MM
         start_y_mm = start_y_grid * GRID_SIZE_MM
         
-        global robot
         robot = RobotState(start_x_mm, start_y_mm, start_map_heading)
 
         raw_map_data = []
@@ -1239,18 +1342,23 @@ def main():
         else:
             raw_map_data = ["0"*20 for _ in range(20)]
 
-        global planner
         planner = PathPlanner(raw_map_data, inflation_r=INFLATION_RADIUS)
         
+        # 既存のスレッド: 位置監視
         monitor_thread = threading.Thread(target=monitor_position, args=(robot, bno, pmw), daemon=True)
         monitor_thread.start()
         print("位置監視システムを開始しました。")
 
+        # 既存のスレッド: APIサーバー
         def run_api():
             uvicorn.run(app, host="0.0.0.0", port=8100, log_level="info")
         
         api_thread = threading.Thread(target=run_api, daemon=True)
         api_thread.start()
+
+        # 追加: スケジューラースレッド
+        sched_thread = threading.Thread(target=scheduler_loop, daemon=True)
+        sched_thread.start()
         
         while True:
             EB = False
@@ -1287,28 +1395,26 @@ def main():
             
             if move_queue.qsize() > 0:
                 current_task = move_queue.get()
+                
                 if current_task == AUTOMOVE:
                     print("auto move start")
                     move_to_target(planner, robot, bno, pmw, target_pose)
+                
+                # Manual Pick Table Logic
                 if current_task == PICKTABLE and reserved_table_id != None:
                     if os.path.exists(STOCKER_FILE):
                         try:
                             with open(STOCKER_FILE, 'r') as f:
                                 s_data = json.load(f)
-                                s_x = s_data['x']
-                                s_y = s_data['y']
-                                s_ang = s_data['angle']
+                                s_x, s_y, s_ang = s_data['x'], s_data['y'], s_data['angle']
                             
                             with position_lock:
-                                cx = robot.x
-                                cy = robot.y
-                                ch = robot.heading
-                            
-                            dist_sq = (cx - s_x)**2 + (cy - s_y)**2
-                            diff = normalize_angle_diff(s_ang, ch)
+                                dist_sq = (robot.x - s_x)**2 + (robot.y - s_y)**2
+                                diff = normalize_angle_diff(s_ang, robot.heading)
                             
                             is_at_pos = dist_sq < DIST_THRESHOLD_MM**2
                             is_at_ang = abs(diff) < TURN_THRESHOLD_DEG
+
                             if IS_DEMO:
                                 holding_table_id = pick_table(reserved_table_id)
                             elif (is_at_pos and is_at_ang):
@@ -1316,12 +1422,49 @@ def main():
                             else:
                                 move_to_target(planner, robot, bno, pmw, (s_x, s_y, s_ang))
                                 holding_table_id = pick_table(reserved_table_id)
-                                
+                            
                         except Exception as e:
                             print(f"Pick Table Error: {e}")
                             set_motor_speed(0, 0)
                     else:
                         print("Stocker not found")
+
+                # Schedule Execution Logic
+                if current_task == SCHEDULE_ACTION and scheduled_job_data is not None:
+                    print(f"Executing Schedule: {scheduled_job_data['name']}")
+                    target_tbl_id = scheduled_job_data['tableId']
+                    target_point_name = scheduled_job_data['position'] # saved_pointsのnameを取得
+                    
+                    # 1. Check Table Status & Pick if needed
+                    if holding_table_id != target_tbl_id:
+                        print(f"Need table {target_tbl_id}, currently holding {holding_table_id}. Moving to Stocker.")
+                        if os.path.exists(STOCKER_FILE):
+                            try:
+                                with open(STOCKER_FILE, 'r') as f:
+                                    s_data = json.load(f)
+                                    s_target = (s_data['x'], s_data['y'], s_data['angle'])
+                                
+                                # Move to Stocker
+                                move_to_target(planner, robot, bno, pmw, s_target)
+                                
+                                # Pick Table
+                                new_id = pick_table(target_tbl_id)
+                                holding_table_id = new_id
+                                
+                            except Exception as e:
+                                print(f"Schedule Pick Error: {e}")
+                        else:
+                            print("Stocker not configured, cannot pick table.")
+                    
+                    # 2. Get Coordinate from Saved Points
+                    point_data = get_saved_point_by_name(target_point_name)
+                    if point_data:
+                        target_coords = (point_data['x'], point_data['y'], point_data['angle'])
+                        print(f"Moving to schedule position '{target_point_name}': {target_coords}")
+                        move_to_target(planner, robot, bno, pmw, target_coords)
+                        print("Schedule Action Completed.")
+                    else:
+                        print(f"Error: Target point '{target_point_name}' not found in saved_points.dat")
 
     except KeyboardInterrupt:
         print("\n停止")
