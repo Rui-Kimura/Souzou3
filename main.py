@@ -557,6 +557,84 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
         
         time.sleep(0.02)
 
+def find_empty_stock(camera_id=0, timeout_sec=25):
+    cap = cv2.VideoCapture(camera_id)
+    
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    
+    if not cap.isOpened():
+        print("Error: カメラを起動できませんでした。")
+        return False
+
+    SCAN_RATIO = 0.3
+    start_time = time.time()
+
+    lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
+    lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
+    lower_blue, upper_blue = np.array([100, 150, 0]), np.array([140, 255, 255])
+    lower_green, upper_green = np.array([40, 50, 50]), np.array([80, 255, 255])
+
+    print(f"Monitoring started... (Timeout: {timeout_sec}s)")
+
+    try:
+        while True:
+            elapsed = time.time() - start_time
+            if elapsed > timeout_sec:
+                print("\nTimeout: 条件を満たすパターンが見つかりませんでした。")
+                return False
+
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            height, width = frame.shape[:2]
+            scan_h = int(height * SCAN_RATIO)
+            center_y, center_x = height // 2, width // 2
+            top_y, bottom_y = center_y - (scan_h // 2), center_y + (scan_h // 2)
+            
+            roi = frame[top_y:bottom_y, 0:width]
+            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+
+            mask_red = cv2.addWeighted(cv2.inRange(hsv, lower_red1, upper_red1), 1.0,
+                                       cv2.inRange(hsv, lower_red2, upper_red2), 1.0, 0)
+            mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
+            mask_green = cv2.inRange(hsv, lower_green, upper_green)
+
+            red_rects = find_shape_info(mask_red, is_line=False)
+            blue_rects = find_shape_info(mask_blue, is_line=False)
+            green_lines = find_shape_info(mask_green, is_line=True)
+
+            has_red_left = any(r['cx'] < center_x for r in red_rects)
+            has_blue_right = any(b['cx'] > center_x for b in blue_rects)
+            has_green_line = len(green_lines) > 0
+
+            if has_red_left and has_blue_right:
+                if has_green_line:
+                    print(f"\r[STATUS] Pattern matched but Green Line exists. Continuing... ({int(elapsed)}s)", end="")
+                    continue
+                else:
+                    print("\nSuccess: Condition met (Red-Left, Blue-Right).")
+                    return True
+            
+            print(f"\rMonitoring... {int(elapsed)}s", end="")
+            time.sleep(0.05) 
+
+    finally:
+        cap.release()
+
+def find_shape_info(mask, is_line=False):
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    found = []
+    for cnt in contours:
+        if cv2.contourArea(cnt) < 500:
+            continue
+        x, y, w, h = cv2.boundingRect(cnt)
+        aspect = float(w) / h
+        if (is_line and aspect > 3.0) or (not is_line and 0.5 < aspect < 2.0):
+            found.append({'cx': x + w // 2})
+    return found
+
 def get_jan_code_value(camera_id=0, timeout_sec=25):
     cap = cv2.VideoCapture(camera_id)
     if not cap.isOpened():
@@ -702,10 +780,34 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     return True
 
 def pick_table(table_name: str):
+    if table_id == holding_table_id:
+        return holding_table_id
     arduino.send_command('g')
     time.sleep(1)
     move_linear(1)
+    if holding_table_id is not None:
+        FoundEmpty = find_empty_stock()
+        if FoundEmpty:
+            move_linear(0)
+            time.sleep(0.5)
+            move_linear(1)
+            time.sleep(1)
+            move_linear(0)
+            arduino.send_command('r')
+            time.sleep(1)
+            arduino.send_command('o')
+            time.sleep(5)
+            move_linear(-1)
+            time.sleep(1.5)
+            move_linear(0)
+            arduino.send_command('c')
+            time.sleep(5)
+            arduino.send_command('g')
+
+    
+    move_linear(1)
     table_id = get_jan_code_value()
+    
     if table_id is None:
         print("テーブルが発見できませんでした。")
         move_linear(-1)
