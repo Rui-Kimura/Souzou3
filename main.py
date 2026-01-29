@@ -779,31 +779,38 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
 
     return True
 
+def return_table():
+    if holding_table_id is None:
+        return None
+    FoundEmpty = find_empty_stock()
+    if FoundEmpty:
+        move_linear(0)
+        time.sleep(0.5)
+        move_linear(1)
+        time.sleep(1)
+        move_linear(0)
+        arduino.send_command('r')
+        time.sleep(1)
+        arduino.send_command('o')
+        time.sleep(5)
+        move_linear(-1)
+        time.sleep(1.5)
+        move_linear(0)
+        arduino.send_command('c')
+        time.sleep(5)
+        arduino.send_command('g')
+        move_linear(-1)
+        time.sleep(24)
+        move_linear(0)
+        holding_table_id = None
+
 def pick_table(table_name: str):
     if table_id == holding_table_id:
         return holding_table_id
     arduino.send_command('g')
     time.sleep(1)
-    move_linear(1)
     if holding_table_id is not None:
-        FoundEmpty = find_empty_stock()
-        if FoundEmpty:
-            move_linear(0)
-            time.sleep(0.5)
-            move_linear(1)
-            time.sleep(1)
-            move_linear(0)
-            arduino.send_command('r')
-            time.sleep(1)
-            arduino.send_command('o')
-            time.sleep(5)
-            move_linear(-1)
-            time.sleep(1.5)
-            move_linear(0)
-            arduino.send_command('c')
-            time.sleep(5)
-            arduino.send_command('g')
-
+        return_table()
     
     move_linear(1)
     table_id = get_jan_code_value()
