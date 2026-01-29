@@ -1135,6 +1135,23 @@ def set_schedule(item: ScheduleItem):
     action = "updated" if is_updated else "created"
     return {"message": f"Schedule successfully {action}", "data": item}
 
+@app.get("/delete_schedule")
+def delete_schedule(id: str):
+    """指定されたIDのスケジュールを削除"""
+    try:
+        schedules = load_schedules_from_file()
+        before_count = len(schedules)
+        # IDが一致しないものだけ残す
+        schedules = [s for s in schedules if s["id"] != id]
+        save_schedules_to_file(schedules)
+        
+        if len(schedules) < before_count:
+            return {"message": "deleted", "id": id}
+        else:
+            return {"message": "not found", "id": id}
+    except Exception as e:
+        return {"message": "error", "error": str(e)}
+
 # --- Control & Action API ---
 
 @app.get("/automove_start")
