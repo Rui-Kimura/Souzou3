@@ -38,15 +38,11 @@ interface StockerData {
 
 export default function Map() {
   const TILE_SIZE = 20;
-  const TILE_WIDTH = 50; // 50mm
+  const TILE_WIDTH = 50;
 
-  // --- ストッカー形状定義 (180度反転: 前方配置) ---
   const GREEN_FRAME_POINTS = [
-    // 奥のバー (Y: -400mm, 幅11マス)
     ...Array.from({ length: 11 }, (_, i) => ({ x: -250 + i * 50, y: -400 })),
-    // 左アーム (X: -250mm, Y: -200 〜 -350mm)
     ...Array.from({ length: 4 }, (_, i) => ({ x: -250, y: -200 - i * 50 })),
-    // 右アーム (X: 250mm, Y: -200 〜 -350mm)
     ...Array.from({ length: 4 }, (_, i) => ({ x: 250, y: -200 - i * 50 })),
   ];
 
@@ -80,7 +76,6 @@ export default function Map() {
   const [snackMessage, setSnackMessage] = useState("");
   const [snackOpen, setSnackOpen] = useState(false);
 
-  // ストッカー配置モード用State
   const [isStockerNameDialogOpen, setStockerNameDialogOpen] = useState(false);
   const [isPlacementMode, setPlacementMode] = useState(false);
   const [isPlacementFrozen, setPlacementFrozen] = useState(false);
@@ -91,7 +86,6 @@ export default function Map() {
 
   const mapContainerRef = useRef<HTMLDivElement>(null);
 
-  // --- WebSocket接続 ---
   useEffect(() => {
     const ws = new WebSocket("/api/local/ws");
 
@@ -117,7 +111,6 @@ export default function Map() {
     };
   }, []);
 
-  // --- データ取得 ---
   const fetch_mapdata = async () => {
     try {
       const res = await fetch("/api/local/mapdata");
@@ -170,7 +163,6 @@ export default function Map() {
     fetch_stocker();
   }, []);
 
-  // 既存ストッカーの描画反映
   useEffect(() => {
     if (!isPlacementMode && existingStocker) {
       updateStockerGridKeys(existingStocker.x, existingStocker.y, existingStocker.angle);
@@ -178,9 +170,6 @@ export default function Map() {
       setStockerGridKeys(new Set());
     }
   }, [isPlacementMode, existingStocker, mapdata]);
-
-
-  // --- ロジック ---
 
   const findPointAtGrid = (r: number, c: number) => {
     return savedPoints.find(p => {
@@ -246,9 +235,6 @@ export default function Map() {
     return { valid: true, msg: "" };
   };
 
-
-  // --- イベントハンドラ ---
-
   const handleStartStockerRegistration = () => {
     setPointName(existingStocker ? existingStocker.name : "Stocker_1");
     setStockerNameDialogOpen(true);
@@ -271,93 +257,42 @@ export default function Map() {
     fetch_costmapdata("base");
   };
 
- // 修正版: スケール（拡大縮小）とスクロール、パディングを考慮した座標計算
   const handlePlacementMove = (clientX: number, clientY: number) => {
     if (isPlacementFrozen || !mapContainerRef.current || !mapdata.length) return;
     
     const container = mapContainerRef.current;
     const rect = container.getBoundingClientRect();
 
-    // 1. スケール倍率を算出
-    // (見た目のサイズ / 実際の内部サイズ)
-    // 通常は1ですが、transform: scale() が効いていると 1以外になります
     const scaleX = rect.width / container.offsetWidth;
     const scaleY = rect.height / container.offsetHeight;
 
-    // 2. コンテナ左上からの相対座標を計算
     const visualRelX = clientX - rect.left;
     const visualRelY = clientY - rect.top;
 
-    // 3. スケールによる補正（元のサイズ感に戻す）
     const unscaledRelX = visualRelX / scaleX;
     const unscaledRelY = visualRelY / scaleY;
 
-    // 4. スクロール量とパディング(10px)を考慮して、内部座標を確定
     const paddingX = 10; 
     const paddingY = 10;
 
     const internalX = unscaledRelX + container.scrollLeft - paddingX;
     const internalY = unscaledRelY + container.scrollTop - paddingY;
 
-    // グリッド座標に変換
     const mouseCol = Math.floor(internalX / TILE_SIZE);
     const mouseRow = Math.floor(internalY / TILE_SIZE);
 
-    // --- 以降は変更なし ---
     const mousePhysX = mouseCol * TILE_WIDTH + TILE_WIDTH / 2.0;
     const mousePhysY = mouseRow * TILE_WIDTH + TILE_WIDTH / 2.0;
 
-    let bestX = mousePhysX, bestY = mousePhysY;
-    let bestAdjacencyScore = -1;
-    let foundValid = false;
-    const SEARCH_RADIUS = 3;
-    const rad = (tempStocker.angle * Math.PI) / 180;
-    const cos = Math.cos(rad), sin = Math.sin(rad);
-
-    for (let dr = -SEARCH_RADIUS; dr <= SEARCH_RADIUS; dr++) {
-      for (let dc = -SEARCH_RADIUS; dc <= SEARCH_RADIUS; dc++) {
-        const testX = mousePhysX + dc * TILE_WIDTH;
-        const testY = mousePhysY + dr * TILE_WIDTH;
-        
-        if (!validatePlacement(testX, testY, tempStocker.angle).valid) continue;
-
-        let currentScore = 0;
-        for (const p of GREEN_FRAME_POINTS) {
-            const absX = testX + (p.x * cos - p.y * sin);
-            const absY = testY + (p.x * sin + p.y * cos);
-            const c = Math.floor(absX / TILE_WIDTH);
-            const r = Math.floor(absY / TILE_WIDTH);
-            if (isWall(r+1, c)) currentScore++;
-            if (isWall(r-1, c)) currentScore++;
-            if (isWall(r, c+1)) currentScore++;
-            if (isWall(r, c-1)) currentScore++;
-        }
-
-        if (currentScore > bestAdjacencyScore) {
-            bestAdjacencyScore = currentScore;
-            bestX = testX; bestY = testY;
-            foundValid = true;
-        } else if (currentScore === bestAdjacencyScore && foundValid) {
-             if (Math.hypot(testX - mousePhysX, testY - mousePhysY) < Math.hypot(bestX - mousePhysX, bestY - mousePhysY)) {
-                bestX = testX; bestY = testY;
-            }
-        }
-      }
-    }
-
-    const finalX = foundValid ? bestX : mousePhysX;
-    const finalY = foundValid ? bestY : mousePhysY;
+    const finalX = mousePhysX;
+    const finalY = mousePhysY;
     
     setTempStocker(prev => ({ ...prev, x: finalX, y: finalY }));
     updateStockerGridKeys(finalX, finalY, tempStocker.angle);
 
-    if (foundValid) {
-        setPlacementValid(true);
-        setValidationMsg(bestAdjacencyScore > 0 ? "壁に吸着中" : "");
-    } else {
-        setPlacementValid(false);
-        setValidationMsg(validatePlacement(mousePhysX, mousePhysY, tempStocker.angle).msg);
-    }
+    const validation = validatePlacement(finalX, finalY, tempStocker.angle);
+    setPlacementValid(validation.valid);
+    setValidationMsg(validation.msg);
   };
 
   const onMapMouseMove = (e: React.MouseEvent) => { if (isPlacementMode) handlePlacementMove(e.clientX, e.clientY); };
@@ -461,7 +396,6 @@ export default function Map() {
     }
   };
 
-
   const handleSavePoint = async () => {
     if (!selectedGrid) return;
     if (selectedSavedPoint && selectedSavedPoint.name !== pointName) {
@@ -543,7 +477,7 @@ export default function Map() {
   return (
     <Box sx={{ 
         width: "100%", 
-        minHeight: "100vh", // マップ画面は高さ確保のため維持
+        minHeight: "100vh", 
         bgcolor: "background.default", 
         py: 4, 
         display: "flex", 
@@ -565,27 +499,25 @@ export default function Map() {
             onTouchMove={onMapTouchMove}
             sx={{
               position: "relative", padding: "10px", overflow: "auto", 
-              bgcolor: "background.paper", // テーマの背景色
+              bgcolor: "background.paper", 
               display: "flex", flexDirection: "column",
               touchAction: isPlacementMode ? "none" : "auto", 
               cursor: isPlacementMode ? (isPlacementFrozen ? "default" : "move") : "default"
             }}
           >
-            {/* プレイヤーアイコン */}
             <Box
               sx={{
                 position: "absolute", width: 0, height: 0,
                 borderLeft: `${iconSize / 2}px solid transparent`,
                 borderRight: `${iconSize / 2}px solid transparent`,
                 borderBottom: `${iconSize}px solid`, 
-                borderBottomColor: "error.main", // テーマのError色(赤)
+                borderBottomColor: "error.main", 
                 left: playerPixelX + 10, top: playerPixelY + 10,
                 transform: `translate(-50%, -50%) rotate(${position_angle}deg)`,
                 zIndex: 20, pointerEvents: "none", transition: "all 0.1s ease-out"
               }}
             />
 
-            {/* マップ描画 */}
             {mapdata.map((rowString: string, rowIndex) => (
               <Box key={rowIndex} sx={{ display: "flex" }}>
                 {rowString.split("").map((cellChar, colIndex) => {
@@ -595,25 +527,22 @@ export default function Map() {
                   
                   const isStockerCell = stockerGridKeys.has(`${rowIndex}-${colIndex}`);
                   
-                  let bgcolor: string | ((theme: any) => string) = "grey.50"; // 通路(デフォルト)
+                  let bgcolor: string | ((theme: any) => string) = "grey.50"; 
                   
                   if (isWall) {
-                      bgcolor = "grey.800"; // 壁
+                      bgcolor = "grey.800"; 
                   } else if (savedPoint) {
-                      bgcolor = "primary.main"; // 登録地点(テーマ色)
+                      bgcolor = "primary.main"; 
                   }
                   
                   if (!isWall && isStockerCell) {
                       if (isPlacementMode && !placementValid) {
-                          // 無効な配置(赤色半透明)
                           bgcolor = (theme) => alpha(theme.palette.error.main, 0.7);
                       } else {
-                          // 有効な配置(緑色)
                           bgcolor = "success.light";
                       }
                   }
 
-                  // コスト領域の斜線
                   let bgImage = (!isWall && !savedPoint && isCost)
                           ? "repeating-linear-gradient(45deg, rgba(255, 0, 0, 0.15) 0, rgba(255, 0, 0, 0.15) 2px, transparent 2px, transparent 6px)" 
                           : "none";
@@ -659,7 +588,6 @@ export default function Map() {
               </Box>
             ))}
 
-            {/* 配置モード中の中心点マーカー */}
             {isPlacementMode && (
                  <Box
                     sx={{
