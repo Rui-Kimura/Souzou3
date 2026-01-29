@@ -711,7 +711,7 @@ def pick_table(table_name: str):
         move_linear(-1)
         time.sleep(25)
         move_linear(0)
-        return -1
+        return None
     else:
         move_linear(0)
         time.sleep(0.5)
@@ -735,7 +735,7 @@ def pick_table(table_name: str):
         move_linear(-1)
         time.sleep(24)
         move_linear(0)
-    return 1
+    return table_id
 
 # ==========================================
 # FastAPI Setup & Handlers
@@ -1201,12 +1201,12 @@ def main():
                             is_at_pos = dist_sq < DIST_THRESHOLD_MM**2
                             is_at_ang = abs(diff) < TURN_THRESHOLD_DEG
                             if IS_DEMO:
-                                pick_table(reserved_table_id)
+                                holding_table_id = pick_table(reserved_table_id)
                             elif (is_at_pos and is_at_ang):
-                                pick_table(reserved_table_id)
+                                holding_table_id = pick_table(reserved_table_id)
                             else:
                                 move_to_target(planner, robot, bno, pmw, (s_x, s_y, s_ang))
-                                pick_table(reserved_table_id)
+                                holding_table_id = pick_table(reserved_table_id)
                                 
                         except Exception as e:
                             print(f"Pick Table Error: {e}")
