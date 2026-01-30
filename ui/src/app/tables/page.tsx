@@ -15,9 +15,18 @@ import {
   Chip,
   Stack,
   Snackbar,
-  Collapse
+  Collapse,
+  IconButton,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
+import AddIcon from "@mui/icons-material/Add";
+import EditIcon from "@mui/icons-material/Edit";
+import DeleteIcon from "@mui/icons-material/Delete";
 
 interface TableItem {
   id: string;
@@ -29,52 +38,109 @@ export default function TablePage() {
   const [items, setItems] = useState<TableItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  
-  // 選択されたカードのIDを管理
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  
-  // スナックバー（通知）用
+
+  // 通知用
   const [snackOpen, setSnackOpen] = useState(false);
   const [snackMessage, setSnackMessage] = useState("");
 
+  // ダイアログ用
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [isEdit, setIsEdit] = useState(false);
+  const [formData, setFormData] = useState<TableItem>({ id: "", name: "", memo: "" });
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/local/table_data");
+      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+      const data = await res.json();
+      setItems(data);
+    } catch (err) {
+      console.error("Fetch error:", err);
+      setError("データの取得に失敗しました。");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetch("/api/local/table_data");
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-        const data = await res.json();
-        setItems(data);
-      } catch (err) {
-        console.error("Fetch error:", err);
-        setError("データの取得に失敗しました。");
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchData();
   }, []);
 
   const handleCardClick = (id: string) => {
-    setSelectedId(prev => prev === id ? null : id);
+    setSelectedId((prev) => (prev === id ? null : id));
   };
 
-  // 【修正箇所】GETリクエストに変更し、クエリパラメータでIDを送信
-  const handlePick = async (e: React.MouseEvent, id: string) => {
+  // --- 削除機能 ---
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
+    if (!confirm("このデータを削除してもよろしいですか？")) return;
 
     try {
-      // URLにクエリパラメータ ?id=... を付与してGETリクエスト
-      const res = await fetch(`/api/local/pick_table?id=${encodeURIComponent(id)}`, {
-        method: "GET",
+      const res = await fetch(`/api/local/delete_table_data?id=${id}`, { method: "GET" });
+      const result = await res.json();
+      if (res.ok && result.message === "deleted") {
+        setSnackMessage("削除しました");
+        fetchData();
+      } else {
+        setSnackMessage("削除に失敗しました");
+      }
+    } catch (err) {
+      setSnackMessage("エラーが発生しました");
+    } finally {
+      setSnackOpen(true);
+    }
+  };
+
+  // --- 保存（新規・編集）機能 ---
+  const handleSave = async () => {
+    if (!formData.id || !formData.name) {
+      alert("IDと名称は必須です");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/local/add_table_data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
       });
 
       if (res.ok) {
-        setSnackMessage(`ID: ${id} の取り出し指示を送信しました`);
+        setSnackMessage(isEdit ? "更新しました" : "追加しました");
+        setDialogOpen(false);
+        fetchData();
       } else {
-        setSnackMessage("送信に失敗しました");
+        setSnackMessage("保存に失敗しました");
       }
+    } catch (err) {
+      setSnackMessage("エラーが発生しました");
+    } finally {
+      setSnackOpen(true);
+    }
+  };
+
+  const openAddDialog = () => {
+    setIsEdit(false);
+    setFormData({ id: "", name: "", memo: "" });
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (e: React.MouseEvent, item: TableItem) => {
+    e.stopPropagation();
+    setIsEdit(true);
+    setFormData(item);
+    setDialogOpen(true);
+  };
+
+  const handlePick = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    try {
+      const res = await fetch(`/api/local/pick_table?id=${encodeURIComponent(id)}`);
+      if (res.ok) setSnackMessage(`ID: ${id} の取り出し指示を送信しました`);
+      else setSnackMessage("送信に失敗しました");
     } catch (error) {
-      console.error(error);
       setSnackMessage("通信エラーが発生しました");
     } finally {
       setSnackOpen(true);
@@ -82,88 +148,97 @@ export default function TablePage() {
   };
 
   return (
-    <Box
-      sx={{
-        width: "100%",
-        minHeight: "100vh",
-        bgcolor: "background.default",
-        py: 4,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
+    <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8f9fa", py: 4 }}>
       <Container maxWidth="lg">
-        <Typography 
-          variant="h5" 
-          component="h1" 
-          sx={{ mb: 4, color: "text.primary", fontWeight: 'bold', textAlign: "center" }}
-        >
-          データ一覧
-        </Typography>
+        {/* ヘッダー部分 */}
+        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
+          <Typography variant="h4" sx={{ fontWeight: "bold", color: "#333" }}>
+            テーブル管理
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={openAddDialog}
+            sx={{
+              bgcolor: "#4db6ac",
+              "&:hover": { bgcolor: "#3d9189" },
+              borderRadius: 2,
+              px: 3,
+              fontWeight: "bold",
+            }}
+          >
+            新規作成
+          </Button>
+        </Stack>
 
         {loading ? (
           <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
             <CircularProgress color="primary" />
           </Box>
         ) : error ? (
-          <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>
+          <Alert severity="error">{error}</Alert>
         ) : (
           <Grid container spacing={3}>
             {items.map((item) => {
               const isSelected = selectedId === item.id;
-              
               return (
-                <Grid key={item.id} size={{ xs: 12, sm: 6, md: 4 }}>
+                <Grid key={item.id} size={12}>
                   <Card
-                    elevation={isSelected ? 8 : 2}
+                    elevation={isSelected ? 4 : 1}
                     onClick={() => handleCardClick(item.id)}
                     sx={{
-                      height: "100%",
-                      display: "flex",
-                      flexDirection: "column",
-                      bgcolor: isSelected ? (theme) => alpha(theme.palette.primary.main, 0.05) : "background.paper",
-                      transition: "all 0.3s ease",
-                      borderLeft: 6,
-                      borderColor: isSelected ? "secondary.main" : "primary.main",
-                      cursor: "pointer",
-                      transform: isSelected ? "scale(1.02)" : "scale(1)",
-                      "&:hover": {
-                        transform: isSelected ? "scale(1.02)" : "translateY(-4px)",
-                        boxShadow: (theme) => `0 8px 24px ${alpha(theme.palette.primary.main, 0.15)}`,
-                      },
+                      position: "relative",
+                      borderRadius: 2,
+                      borderLeft: 8,
+                      borderColor: "#4db6ac",
+                      transition: "0.2s",
+                      "&:hover": { transform: "translateY(-2px)", boxShadow: 3 },
                     }}
                   >
-                    <CardContent sx={{ flexGrow: 1 }}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }}>
-                        <Chip 
-                          label={`ID: ${item.id}`} 
-                          size="small" 
-                          variant={isSelected ? "filled" : "outlined"}
-                          color="primary"
-                          sx={{ fontWeight: "bold" }}
-                        />
+                    <CardContent>
+                      <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
+                        <Box>
+                          <Chip
+                            label={`ID: ${item.id}`}
+                            size="small"
+                            sx={{
+                              mb: 1,
+                              bgcolor: alpha("#4db6ac", 0.1),
+                              color: "#00897b",
+                              fontWeight: "bold",
+                              border: "1px solid",
+                              borderColor: "#4db6ac",
+                            }}
+                          />
+                          <Typography variant="h5" sx={{ fontWeight: "bold", mb: 1 }}>
+                            {item.name}
+                          </Typography>
+                          <Typography variant="body1" color="text.secondary">
+                            {item.memo}
+                          </Typography>
+                        </Box>
+                        {/* 操作アイコン */}
+                        <Stack direction="row" spacing={1}>
+                          <IconButton size="small" onClick={(e) => openEditDialog(e, item)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                          <IconButton size="small" color="error" onClick={(e) => handleDelete(e, item.id)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Stack>
                       </Stack>
-                      
-                      <Typography gutterBottom variant="h6" component="div" sx={{ fontWeight: "bold", color: "text.primary" }}>
-                        {item.name}
-                      </Typography>
-                      
-                      <Typography variant="body2" color="text.secondary" sx={{ mt: 1, whiteSpace: "pre-wrap" }}>
-                        {item.memo}
-                      </Typography>
                     </CardContent>
 
                     <Collapse in={isSelected} timeout="auto" unmountOnExit>
-                      <CardActions sx={{ p: 2, pt: 0, justifyContent: "flex-end" }}>
-                        <Button 
-                          variant="contained" 
+                      <CardActions sx={{ p: 2, pt: 0, bgcolor: alpha("#4db6ac", 0.02) }}>
+                        <Button
+                          variant="contained"
+                          fullWidth
                           color="secondary"
                           onClick={(e) => handlePick(e, item.id)}
-                          fullWidth
                           sx={{ fontWeight: "bold" }}
                         >
-                          取り出し
+                          このテーブルを取り出す
                         </Button>
                       </CardActions>
                     </Collapse>
@@ -174,6 +249,47 @@ export default function TablePage() {
           </Grid>
         )}
       </Container>
+
+      {/* 追加・編集ダイアログ */}
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle sx={{ fontWeight: "bold" }}>
+          {isEdit ? "テーブルの編集" : "テーブルの新規登録"}
+        </DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={3} sx={{ mt: 1 }}>
+            <TextField
+              label="ID (JANコード等)"
+              fullWidth
+              disabled={isEdit}
+              value={formData.id}
+              onChange={(e) => setFormData({ ...formData, id: e.target.value })}
+              helperText="一意のIDを入力してください"
+            />
+            <TextField
+              label="名称"
+              fullWidth
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            />
+            <TextField
+              label="メモ"
+              fullWidth
+              multiline
+              rows={3}
+              value={formData.memo}
+              onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDialogOpen(false)} color="inherit">
+            キャンセル
+          </Button>
+          <Button onClick={handleSave} variant="contained" sx={{ bgcolor: "#4db6ac" }}>
+            保存する
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={snackOpen}

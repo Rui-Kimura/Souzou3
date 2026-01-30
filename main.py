@@ -1269,6 +1269,22 @@ def add_table_data(item: TableItem):
     action = "updated" if is_updated else "created"
     return {"message": f"Data successfully {action}", "data": item}
 
+@app.get("/delete_table_data")
+def delete_table_data(id: str):
+    try:
+        current_data = load_data_from_file()
+        before_count = len(current_data)
+        
+        current_data = [item for item in current_data if item.get("id") != id]
+        
+        if len(current_data) < before_count:
+            save_data_to_file(current_data)
+            return {"message": "deleted", "id": id}
+        else:
+            return {"message": "not found", "id": id}
+    except Exception as e:
+        return {"message": "error", "error": str(e)}
+
 @app.get("/table_now")
 def get_current_table_api():
     return{"table_id":holding_table_id}
