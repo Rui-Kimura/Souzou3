@@ -703,7 +703,7 @@ def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
         print("Error: カメラを起動できませんでした。")
         return None
 
-    SCAN_RATIO = 0.3 
+    SCAN_RATIO = 0.35 
     start_time = time.time()
     
     try:
@@ -882,6 +882,8 @@ def return_table():
         time.sleep(max(0, 25 - elapsed_time+2))
         move_linear(0)
         holding_table_id = None
+    else:
+        return None
 
 def pick_table(target_table_id: str):
     if target_table_id == holding_table_id:
@@ -889,7 +891,8 @@ def pick_table(target_table_id: str):
     arduino.send_command('g')
     time.sleep(1)
     if holding_table_id is not None:
-        return_table()
+        if return_table() is None:
+            return holding_table_id
     
     move_linear(1)
     start_time = time.time()
