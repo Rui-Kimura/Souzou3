@@ -587,10 +587,18 @@ import cv2
 import numpy as np
 import time
 
+import cv2
+import numpy as np
+import time
+
+import cv2
+import numpy as np
+import time
+
 def find_empty_stock(camera_id=0, timeout_sec=25):
-    cap = cv2.VideoCapture(camera_id)
+    # Windowsでのカメラエラー対策として cv2.CAP_DSHOW を追加
+    cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
     
-    # Raspberry Pi等の負荷軽減用
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     
@@ -598,13 +606,17 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         print("Error: カメラを起動できませんでした。")
         return False
 
-    SCAN_RATIO = 0.3
+    # --- 二重ROI設定 ---
+    SCAN_RATIO_SQUARE = 0.1  # 青四角用（狭い範囲）
+    SCAN_RATIO_LINE   = 0.7  # 赤線用（広い範囲：見落とし防止）
+    # ------------------
+
     start_time = time.time()
 
-    # 緑の定義を削除し、赤と青のみ定義
+    # 色定義（青と赤のみ）
+    lower_blue, upper_blue = np.array([100, 150, 0]), np.array([140, 255, 255])
     lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
-    lower_blue, upper_blue = np.array([100, 150, 0]), np.array([140, 255, 255])
 
     print(f"Monitoring started... (Timeout: {timeout_sec}s)")
 
@@ -620,40 +632,45 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
                 continue
 
             height, width = frame.shape[:2]
-            scan_h = int(height * SCAN_RATIO)
-            center_y, center_x = height // 2, width // 2
-            top_y, bottom_y = center_y - (scan_h // 2), center_y + (scan_h // 2)
+            center_y = height // 2
+
+            # --- ROI切り出し ---
+            # 1. 青四角用（狭い）
+            scan_h_sq = int(height * SCAN_RATIO_SQUARE)
+            top_sq = center_y - (scan_h_sq // 2)
+            bottom_sq = center_y + (scan_h_sq // 2)
+            roi_sq = frame[top_sq:bottom_sq, 0:width]
             
-            roi = frame[top_y:bottom_y, 0:width]
-            hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            # 2. 赤線用（広い）
+            scan_h_li = int(height * SCAN_RATIO_LINE)
+            top_li = center_y - (scan_h_li // 2)
+            bottom_li = center_y + (scan_h_li // 2)
+            roi_li = frame[top_li:bottom_li, 0:width]
 
-            # 赤マスク（四角と線の両方に使用）
-            mask_red = cv2.addWeighted(cv2.inRange(hsv, lower_red1, upper_red1), 1.0,
-                                       cv2.inRange(hsv, lower_red2, upper_red2), 1.0, 0)
-            # 青マスク
-            mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
-
-            # --- 形状検出の変更点 ---
-            # 赤マスクから「四角」を探す
-            red_rects = find_shape_info(mask_red, is_line=False)
-            # 青マスクから「四角」を探す
+            # --- マスク作成と形状検出 ---
+            # 青四角を探す（狭いエリアから）
+            hsv_sq = cv2.cvtColor(roi_sq, cv2.COLOR_BGR2HSV)
+            mask_blue = cv2.inRange(hsv_sq, lower_blue, upper_blue)
             blue_rects = find_shape_info(mask_blue, is_line=False)
-            # 赤マスクから「横線」を探す (mask_greenではなくmask_redを使用)
+
+            # 赤線を探す（広いエリアから）
+            hsv_li = cv2.cvtColor(roi_li, cv2.COLOR_BGR2HSV)
+            mask_red = cv2.addWeighted(cv2.inRange(hsv_li, lower_red1, upper_red1), 1.0,
+                                       cv2.inRange(hsv_li, lower_red2, upper_red2), 1.0, 0)
             red_lines = find_shape_info(mask_red, is_line=True)
 
-            has_red_left = any(r['cx'] < center_x for r in red_rects)
-            has_blue_right = any(b['cx'] > center_x for b in blue_rects)
-            has_red_line = len(red_lines) > 0
+            # --- 判定ロジックの変更点 ---
+            has_blue = len(blue_rects) > 0      # 青四角があればOK（左右位置は問わない）
+            has_red_line = len(red_lines) > 0   # 赤線があればNG
 
-            # 判定ロジック
-            if has_red_left and has_blue_right:
+            if has_blue:
                 if has_red_line:
-                    # 赤い横線がある場合は待機
-                    print(f"\r[STATUS] Pattern matched but Red Line exists. Continuing... ({int(elapsed)}s)", end="")
+                    # 青四角はあるが、赤線も広い範囲のどこかにある
+                    print(f"\r[STATUS] Blue detected, but Red Line exists. Waiting... ({int(elapsed)}s)", end="")
                     continue
                 else:
-                    # 赤い横線がなくなったら成功
-                    print("\nSuccess: Condition met (Red-Left, Blue-Right, No Red-Line).")
+                    # 青四角があり、赤線がない
+                    print("\nSuccess: Blue detected and No Red-Line.")
                     return True
             
             print(f"\rMonitoring... {int(elapsed)}s", end="")
@@ -671,9 +688,6 @@ def find_shape_info(mask, is_line=False):
         x, y, w, h = cv2.boundingRect(cnt)
         aspect = float(w) / h
         
-        # is_lineフラグによってアスペクト比の判定を切り替え
-        # 線検出: 横幅が高さの3倍以上
-        # 四角検出: 縦横比が0.5～2.0
         if (is_line and aspect > 3.0) or (not is_line and 0.5 < aspect < 2.0):
             found.append({'cx': x + w // 2})
     return found
