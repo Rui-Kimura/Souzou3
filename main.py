@@ -596,8 +596,7 @@ import numpy as np
 import time
 
 def find_empty_stock(camera_id=0, timeout_sec=25):
-    # Windowsでのカメラエラー対策として cv2.CAP_DSHOW を追加
-    cap = cv2.VideoCapture(camera_id, cv2.CAP_DSHOW)
+    cap = cv2.VideoCapture(camera_id)
     
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
