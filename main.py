@@ -866,7 +866,7 @@ def return_table():
         time.sleep(0.5)
         move_linear(1)
         start_time = time.time()
-        time.sleep(2)
+        time.sleep(1.5)
         move_linear(0)
         arduino.send_command('r')
         time.sleep(1)
@@ -883,9 +883,10 @@ def return_table():
         time.sleep(max(0, 25 - elapsed_time+2))
         move_linear(0)
         holding_table_id = None
+        return None
     else:
         print("空いている棚が見つかりませんでした。")
-        return None
+        return holding_table_id
 
 def pick_table(target_table_id: str):
     if target_table_id == holding_table_id:
@@ -893,7 +894,7 @@ def pick_table(target_table_id: str):
     arduino.send_command('g')
     time.sleep(1)
     if holding_table_id is not None:
-        if return_table() is None:
+        if return_table() is not None:
             return holding_table_id
     
     move_linear(1)
