@@ -1751,7 +1751,8 @@ def main():
                             is_at_ang = abs(diff) < TURN_THRESHOLD_DEG
 
                             if IS_DEMO:
-                                holding_table_id = pick_table(reserved_table_id)
+                                move_distance_mm(-2000,100)
+                                # holding_table_id = pick_table(reserved_table_id)
                             elif (is_at_pos and is_at_ang):
                                 holding_table_id = pick_table(reserved_table_id)
                             else:
