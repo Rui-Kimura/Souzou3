@@ -570,7 +570,7 @@ def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
     
     # 補正用ゲイン（直進時のふらつきを抑えるための係数）
     # KP_TURNだと回転用で強すぎる場合があるため、必要に応じて調整してください
-    KP_STRAIGHT = 2.0 
+    KP_STRAIGHT = 2.5
 
     with position_lock:
         start_x = robot.x
