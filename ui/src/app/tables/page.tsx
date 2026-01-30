@@ -22,11 +22,14 @@ import {
   DialogContent,
   DialogActions,
   TextField,
+  InputAdornment,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
+import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
+import BarcodeScannerComponent from "react-qr-barcode-scanner";
 
 interface TableItem {
   id: string;
@@ -40,13 +43,12 @@ export default function TablePage() {
   const [error, setError] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // 通知用
   const [snackOpen, setSnackOpen] = useState(false);
   const [snackMessage, setSnackMessage] = useState("");
 
-  // ダイアログ用
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [formData, setFormData] = useState<TableItem>({ id: "", name: "", memo: "" });
 
   const fetchData = async () => {
@@ -72,7 +74,6 @@ export default function TablePage() {
     setSelectedId((prev) => (prev === id ? null : id));
   };
 
-  // --- 削除機能 ---
   const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (!confirm("このデータを削除してもよろしいですか？")) return;
@@ -93,7 +94,6 @@ export default function TablePage() {
     }
   };
 
-  // --- 保存（新規・編集）機能 ---
   const handleSave = async () => {
     if (!formData.id || !formData.name) {
       alert("IDと名称は必須です");
@@ -123,6 +123,7 @@ export default function TablePage() {
 
   const openAddDialog = () => {
     setIsEdit(false);
+    setIsScanning(false);
     setFormData({ id: "", name: "", memo: "" });
     setDialogOpen(true);
   };
@@ -130,6 +131,7 @@ export default function TablePage() {
   const openEditDialog = (e: React.MouseEvent, item: TableItem) => {
     e.stopPropagation();
     setIsEdit(true);
+    setIsScanning(false);
     setFormData(item);
     setDialogOpen(true);
   };
@@ -150,7 +152,6 @@ export default function TablePage() {
   return (
     <Box sx={{ width: "100%", minHeight: "100vh", bgcolor: "#f8f9fa", py: 4 }}>
       <Container maxWidth="lg">
-        {/* ヘッダー部分 */}
         <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 4 }}>
           <Typography variant="h4" sx={{ fontWeight: "bold", color: "#333" }}>
             テーブル管理
@@ -182,7 +183,7 @@ export default function TablePage() {
             {items.map((item) => {
               const isSelected = selectedId === item.id;
               return (
-                <Grid key={item.id} size={12}>
+                <Grid item xs={12} key={item.id}>
                   <Card
                     elevation={isSelected ? 4 : 1}
                     onClick={() => handleCardClick(item.id)}
@@ -192,6 +193,7 @@ export default function TablePage() {
                       borderLeft: 8,
                       borderColor: "#4db6ac",
                       transition: "0.2s",
+                      cursor: "pointer",
                       "&:hover": { transform: "translateY(-2px)", boxShadow: 3 },
                     }}
                   >
@@ -217,7 +219,6 @@ export default function TablePage() {
                             {item.memo}
                           </Typography>
                         </Box>
-                        {/* 操作アイコン */}
                         <Stack direction="row" spacing={1}>
                           <IconButton size="small" onClick={(e) => openEditDialog(e, item)}>
                             <EditIcon fontSize="small" />
@@ -250,7 +251,6 @@ export default function TablePage() {
         )}
       </Container>
 
-      {/* 追加・編集ダイアログ */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} fullWidth maxWidth="xs">
         <DialogTitle sx={{ fontWeight: "bold" }}>
           {isEdit ? "テーブルの編集" : "テーブルの新規登録"}
@@ -258,13 +258,47 @@ export default function TablePage() {
         <DialogContent dividers>
           <Stack spacing={3} sx={{ mt: 1 }}>
             <TextField
-              label="ID (JANコード等)"
+              label="ID (JANコード)"
               fullWidth
               disabled={isEdit}
               value={formData.id}
               onChange={(e) => setFormData({ ...formData, id: e.target.value })}
-              helperText="一意のIDを入力してください"
+              InputProps={{
+                endAdornment: !isEdit && (
+                  <InputAdornment position="end">
+                    <IconButton color="primary" onClick={() => setIsScanning(!isScanning)} edge="end">
+                      <QrCodeScannerIcon />
+                    </IconButton>
+                  </InputAdornment>
+                ),
+              }}
             />
+
+            {isScanning && (
+              <Box sx={{ width: "100%", overflow: "hidden", borderRadius: 2, bgcolor: "#000", position: "relative" }}>
+                <BarcodeScannerComponent
+                  width="100%"
+                  onUpdate={(err, result) => {
+                    if (result) {
+                      setFormData({ ...formData, id: result.getText() });
+                      setIsScanning(false);
+                      setSnackMessage("バーコードを読み取りました");
+                      setSnackOpen(true);
+                    }
+                  }}
+                />
+                <Button 
+                  fullWidth 
+                  variant="contained" 
+                  color="error" 
+                  onClick={() => setIsScanning(false)}
+                  sx={{ borderRadius: 0 }}
+                >
+                  キャンセル
+                </Button>
+              </Box>
+            )}
+
             <TextField
               label="名称"
               fullWidth
