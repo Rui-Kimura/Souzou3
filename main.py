@@ -855,12 +855,14 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     return True
 
 def return_table():
+    print("空いている棚を探しています...")
     global holding_table_id
     if holding_table_id is None:
         return None
     move_linear(1)
     FoundEmpty = find_empty_stock()
     if FoundEmpty:
+        print("空いている棚を発見しました。テーブルを戻します。")
         move_linear(0)
         time.sleep(0.5)
         move_linear(1)
@@ -883,6 +885,7 @@ def return_table():
         move_linear(0)
         holding_table_id = None
     else:
+        print("空いている棚が見つかりませんでした。")
         return None
 
 def pick_table(target_table_id: str):
