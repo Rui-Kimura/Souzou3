@@ -723,88 +723,124 @@ import cv2
 import numpy as np
 import time
 
-def find_empty_stock(camera_id=0, timeout_sec=25):
-    cap = cv2.VideoCapture(camera_id)
-    
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    
-    if not cap.isOpened():
-        print("Error: カメラを起動できませんでした。")
+class WebcamVideoStream:
+    def __init__(self, src=0):
+        self.stream = cv2.VideoCapture(src, cv2.CAP_V4L2)
+        self.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        self.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        self.stream.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        (self.grabbed, self.frame) = self.stream.read()
+        self.stopped = False
+
+    def start(self):
+        Thread(target=self.update, args=(), daemon=True).start()
+        return self
+
+    def update(self):
+        while not self.stopped:
+            ret, frame = self.stream.read()
+            if ret:
+                self.frame = frame
+            else:
+                self.stopped = True
+
+    def read(self):
+        return self.frame
+
+    def stop(self):
+        self.stopped = True
+        self.stream.release()
+
+# --- メイン処理関数 ---
+def find_empty_stock_bottom_focus(camera_id=0, timeout_sec=25):
+    vs = WebcamVideoStream(src=camera_id).start()
+    time.sleep(1.0)
+
+    if vs.read() is None:
+        print("Error: カメラ映像が取得できません。")
+        vs.stop()
         return False
 
-    # --- 二重ROI設定 ---
-    SCAN_RATIO_SQUARE = 0.1  # 青四角用（狭い範囲）
-    SCAN_RATIO_LINE   = 0.6  # 赤線用（広い範囲：見落とし防止）
-    # ------------------
+    # --- 設定エリア ---
+    SCAN_RATIO_SQUARE = 0.3  # 青検知エリアの高さ（30%）
+    SCAN_RATIO_LINE   = 0.5  # 赤線監視エリアの高さ（50%）
+    
+    # 0.5 = 中央, 0.75 = 下寄り, 0.25 = 上寄り
+    VERTICAL_POS_BLUE = 0.75 
+    VERTICAL_POS_RED  = 0.50 # 赤線は全体を見たいので中央のまま
 
     start_time = time.time()
 
-    # 色定義（青と赤のみ）
-    lower_blue, upper_blue = np.array([100, 70, 0]), np.array([140, 255, 255])
+    # 色設定（感度高め）
+    lower_blue = np.array([100, 60, 0])
+    upper_blue = np.array([140, 255, 255])
     lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
 
-    print(f"Monitoring started... (Timeout: {timeout_sec}s)")
+    kernel = np.ones((5, 5), np.uint8)
+    print(f"Monitoring started (Bottom Focus). Timeout: {timeout_sec}s")
 
     try:
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout_sec:
-                print("\nTimeout: 条件を満たすパターンが見つかりませんでした。")
+                print("\nTimeout.")
                 return False
 
-            ret, frame = cap.read()
-            if not ret:
-                continue
+            frame = vs.read()
+            if frame is None: continue
 
             height, width = frame.shape[:2]
-            center_y = height // 2
 
-            # --- ROI切り出し ---
-            # 1. 青四角用（狭い）
+            # --- 1. 青色検知エリア（画面下寄り）の計算 ---
+            center_y_blue = int(height * VERTICAL_POS_BLUE)
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
-            top_sq = center_y - (scan_h_sq // 2)
-            bottom_sq = center_y + (scan_h_sq // 2)
-            roi_sq = frame[top_sq:bottom_sq, 0:width]
+            top_sq = center_y_blue - (scan_h_sq // 2)
+            bottom_sq = center_y_blue + (scan_h_sq // 2)
             
-            # 2. 赤線用（広い）
+            # 画面外にはみ出さないよう調整
+            if top_sq < 0: top_sq = 0
+            if bottom_sq > height: bottom_sq = height
+            
+            roi_sq = frame[top_sq:bottom_sq, 0:width]
+
+            # --- 2. 赤線監視エリア（画面全体）の計算 ---
+            center_y_red = int(height * VERTICAL_POS_RED)
             scan_h_li = int(height * SCAN_RATIO_LINE)
-            top_li = center_y - (scan_h_li // 2)
-            bottom_li = center_y + (scan_h_li // 2)
+            top_li = center_y_red - (scan_h_li // 2)
+            bottom_li = center_y_red + (scan_h_li // 2)
             roi_li = frame[top_li:bottom_li, 0:width]
 
-            # --- マスク作成と形状検出 ---
-            # 青四角を探す（狭いエリアから）
+            # 画像処理
             hsv_sq = cv2.cvtColor(roi_sq, cv2.COLOR_BGR2HSV)
-            mask_blue = cv2.inRange(hsv_sq, lower_blue, upper_blue)
-            blue_rects = find_shape_info(mask_blue, is_line=False)
-
-            # 赤線を探す（広いエリアから）
             hsv_li = cv2.cvtColor(roi_li, cv2.COLOR_BGR2HSV)
+
+            mask_blue = cv2.inRange(hsv_sq, lower_blue, upper_blue)
             mask_red = cv2.addWeighted(cv2.inRange(hsv_li, lower_red1, upper_red1), 1.0,
                                        cv2.inRange(hsv_li, lower_red2, upper_red2), 1.0, 0)
+
+            # 膨張処理（ブレ対策）
+            mask_blue = cv2.dilate(mask_blue, kernel, iterations=2)
+            mask_red = cv2.dilate(mask_red, kernel, iterations=2)
+
+            # 形状検出（条件緩和版）
+            blue_rects = find_shape_info(mask_blue, is_line=False)
             red_lines = find_shape_info(mask_red, is_line=True)
 
-            # --- 判定ロジックの変更点 ---
-            has_blue = len(blue_rects) > 0      # 青四角があればOK（左右位置は問わない）
-            has_red_line = len(red_lines) > 0   # 赤線があればNG
+            has_blue = len(blue_rects) > 0
+            has_red_line = len(red_lines) > 0
 
             if has_blue:
                 if has_red_line:
-                    # 青四角はあるが、赤線も広い範囲のどこかにある
-                    print(f"\r[STATUS] Blue detected, but Red Line exists. Waiting... ({int(elapsed)}s)", end="")
                     continue
                 else:
-                    # 青四角があり、赤線がない
-                    print("\nSuccess: Blue detected and No Red-Line.")
+                    print("\nSuccess: Blue detected (Bottom) & Safe.")
                     return True
             
-            print(f"\rMonitoring... {int(elapsed)}s", end="")
-            time.sleep(0.05) 
+            time.sleep(0.01)
 
     finally:
-        cap.release()
+        vs.stop()
 
 def find_shape_info(mask, is_line=False):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -812,7 +848,6 @@ def find_shape_info(mask, is_line=False):
     for cnt in contours:
         if cv2.contourArea(cnt) < 300: 
             continue
-            
         x, y, w, h = cv2.boundingRect(cnt)
         aspect = float(w) / h
         
