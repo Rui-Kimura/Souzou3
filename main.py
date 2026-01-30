@@ -583,9 +583,14 @@ def monitor_position(robot_instance, bno_sensor, pmw_sensor):
         
         time.sleep(0.02)
 
+import cv2
+import numpy as np
+import time
+
 def find_empty_stock(camera_id=0, timeout_sec=25):
     cap = cv2.VideoCapture(camera_id)
     
+    # Raspberry Pi等の負荷軽減用
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
     
@@ -596,10 +601,10 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     SCAN_RATIO = 0.3
     start_time = time.time()
 
+    # 緑の定義を削除し、赤と青のみ定義
     lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
     lower_blue, upper_blue = np.array([100, 150, 0]), np.array([140, 255, 255])
-    lower_green, upper_green = np.array([40, 50, 50]), np.array([80, 255, 255])
 
     print(f"Monitoring started... (Timeout: {timeout_sec}s)")
 
@@ -622,25 +627,33 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             roi = frame[top_y:bottom_y, 0:width]
             hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
+            # 赤マスク（四角と線の両方に使用）
             mask_red = cv2.addWeighted(cv2.inRange(hsv, lower_red1, upper_red1), 1.0,
-                                         cv2.inRange(hsv, lower_red2, upper_red2), 1.0, 0)
+                                       cv2.inRange(hsv, lower_red2, upper_red2), 1.0, 0)
+            # 青マスク
             mask_blue = cv2.inRange(hsv, lower_blue, upper_blue)
-            mask_green = cv2.inRange(hsv, lower_green, upper_green)
 
+            # --- 形状検出の変更点 ---
+            # 赤マスクから「四角」を探す
             red_rects = find_shape_info(mask_red, is_line=False)
+            # 青マスクから「四角」を探す
             blue_rects = find_shape_info(mask_blue, is_line=False)
-            green_lines = find_shape_info(mask_green, is_line=True)
+            # 赤マスクから「横線」を探す (mask_greenではなくmask_redを使用)
+            red_lines = find_shape_info(mask_red, is_line=True)
 
             has_red_left = any(r['cx'] < center_x for r in red_rects)
             has_blue_right = any(b['cx'] > center_x for b in blue_rects)
-            has_green_line = len(green_lines) > 0
+            has_red_line = len(red_lines) > 0
 
+            # 判定ロジック
             if has_red_left and has_blue_right:
-                if has_green_line:
-                    print(f"\r[STATUS] Pattern matched but Green Line exists. Continuing... ({int(elapsed)}s)", end="")
+                if has_red_line:
+                    # 赤い横線がある場合は待機
+                    print(f"\r[STATUS] Pattern matched but Red Line exists. Continuing... ({int(elapsed)}s)", end="")
                     continue
                 else:
-                    print("\nSuccess: Condition met (Red-Left, Blue-Right).")
+                    # 赤い横線がなくなったら成功
+                    print("\nSuccess: Condition met (Red-Left, Blue-Right, No Red-Line).")
                     return True
             
             print(f"\rMonitoring... {int(elapsed)}s", end="")
@@ -657,6 +670,10 @@ def find_shape_info(mask, is_line=False):
             continue
         x, y, w, h = cv2.boundingRect(cnt)
         aspect = float(w) / h
+        
+        # is_lineフラグによってアスペクト比の判定を切り替え
+        # 線検出: 横幅が高さの3倍以上
+        # 四角検出: 縦横比が0.5～2.0
         if (is_line and aspect > 3.0) or (not is_line and 0.5 < aspect < 2.0):
             found.append({'cx': x + w // 2})
     return found
