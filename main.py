@@ -550,6 +550,134 @@ def set_motor_speed(left_speed, right_speed, rotate=False, brake=False):
         pwm3.ChangeDutyCycle(0)
         pwm4.ChangeDutyCycle(abs(right_duty))
 
+def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
+    """
+    ジャイロ補正を行いながら指定距離(mm)直進する関数
+    
+    Args:
+        dist_mm (float): 移動距離 (正: 前進, 負: 後退)
+        speed (float): 基本速度 (0-100)
+    """
+    global robot
+    
+    if robot is None:
+        print("Error: Robot is not initialized.")
+        return
+
+    # --- 初期設定 ---
+    target_dist = abs(dist_mm)
+    direction = 1 if dist_mm >= 0 else -1  # 進行方向
+    
+    # 補正用ゲイン（直進時のふらつきを抑えるための係数）
+    # KP_TURNだと回転用で強すぎる場合があるため、必要に応じて調整してください
+    KP_STRAIGHT = 1.0 
+
+    with position_lock:
+        start_x = robot.x
+        start_y = robot.y
+        # 動き出した瞬間の角度を「維持すべき目標角度」とする
+        target_heading = robot.heading
+
+    print(f"Move start: {dist_mm}mm (Heading Target: {target_heading:.1f})")
+
+    try:
+        while True:
+            # --- 現在情報の取得 ---
+            with position_lock:
+                curr_x = robot.x
+                curr_y = robot.y
+                curr_heading = robot.heading
+
+            # --- 距離判定 ---
+            # 開始地点からのユークリッド距離を計算
+            distance_covered = math.sqrt((curr_x - start_x)**2 + (curr_y - start_y)**2)
+            
+            if distance_covered >= target_dist:
+                break
+
+            # --- ジャイロ補正計算 (P制御) ---
+            # 目標角度とのズレを計算 (-180 ~ 180度)
+            # diffが正(プラス) = 目標より右を向いているため、左に修正が必要
+            # diffが負(マイナス) = 目標より左を向いているため、右に修正が必要
+            diff = normalize_angle_diff(target_heading, curr_heading)
+            
+            # 補正量 (ズレが大きいほど強く修正)
+            correction = diff * KP_STRAIGHT
+
+            # --- モーター出力決定 ---
+            # 左モーター: ベース速度 - 補正
+            # 右モーター: ベース速度 + 補正
+            # (例: 左にズレている(diff<0) -> correction負 -> 左モーター加速/右モーター減速 -> 右へ旋回)
+            
+            base_l = speed * direction
+            base_r = speed * direction
+            
+            # 進行方向に関わらず、回転方向の修正ロジックは同じ
+            l_speed = base_l - correction
+            r_speed = base_r + correction
+
+            set_motor_speed(l_speed, r_speed)
+            
+            time.sleep(0.02) # 制御ループ周期
+
+    except KeyboardInterrupt:
+        print("Move interrupted.")
+    finally:
+        # 確実に停止
+        set_motor_speed(0, 0, brake=True)
+        print(f"Move finished. Covered: {distance_covered:.1f}mm")
+
+
+def rotate_angle_deg(rel_deg: float):
+    """
+    その場で指定角度(deg)回転する関数
+    
+    Args:
+        rel_deg (float): 回転角度 (正: 左回転/反時計回り, 負: 右回転/時計回り)
+    """
+    global robot
+
+    if robot is None:
+        print("Error: Robot is not initialized.")
+        return
+
+    with position_lock:
+        start_heading = robot.heading
+    
+    target_heading = (start_heading + rel_deg) % 360
+    
+    print(f"Rotate start: {rel_deg} deg (Target: {target_heading:.1f})")
+
+    try:
+        while True:
+            with position_lock:
+                curr_heading = robot.heading
+
+            diff = normalize_angle_diff(target_heading, curr_heading)
+
+            if abs(diff) < TURN_THRESHOLD_DEG:
+                break
+
+            turn_pow = KP_TURN * diff
+            
+            min_p = 80
+            if turn_pow > 0:
+                turn_pow = max(turn_pow, min_p)
+            else:
+                turn_pow = min(turn_pow, -min_p)
+            
+            turn_pow = max(-100, min(100, turn_pow))
+
+            set_motor_speed(-turn_pow, turn_pow)
+
+            time.sleep(0.02)
+
+    except KeyboardInterrupt:
+        print("Rotate interrupted.")
+    finally:
+        set_motor_speed(0, 0, brake=True)
+        print("Rotate finished.")
+
 def move_linear(status):
     if status == 1:
         GPIO.output(LINEAR_IN1, GPIO.LOW)
@@ -917,6 +1045,8 @@ def pick_table(target_table_id: str):
         move_linear(-1)
         time.sleep(1.5)
         move_linear(0)
+        move_distance_mm(100, speed=100)
+        time.sleep(1)
         arduino.send_command('r')
         arduino.send_command('o')
         time.sleep(5)
@@ -930,6 +1060,8 @@ def pick_table(target_table_id: str):
         arduino.send_command('r')
         time.sleep(1)
         arduino.send_command('g')
+        time.sleep(1)
+        move_distance_mm(-100, speed=100)
         time.sleep(1)
         move_linear(-1)
         time.sleep(24)
