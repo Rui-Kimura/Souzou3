@@ -607,7 +607,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
     # --- 二重ROI設定 ---
     SCAN_RATIO_SQUARE = 0.1  # 青四角用（狭い範囲）
-    SCAN_RATIO_LINE   = 0.7  # 赤線用（広い範囲：見落とし防止）
+    SCAN_RATIO_LINE   = 0.6  # 赤線用（広い範囲：見落とし防止）
     # ------------------
 
     start_time = time.time()
