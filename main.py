@@ -886,6 +886,9 @@ def return_table():
         return None
     else:
         print("空いている棚が見つかりませんでした。")
+        move_linear(-1)
+        time.sleep(25)
+        move_linear(0)
         return holding_table_id
 
 def pick_table(target_table_id: str):
