@@ -741,7 +741,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     start_time = time.time()
 
     # 色定義（青と赤のみ）
-    lower_blue, upper_blue = np.array([100, 150, 0]), np.array([140, 255, 255])
+    lower_blue, upper_blue = np.array([100, 70, 0]), np.array([140, 255, 255])
     lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
 
@@ -810,13 +810,18 @@ def find_shape_info(mask, is_line=False):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     found = []
     for cnt in contours:
-        if cv2.contourArea(cnt) < 500:
+        if cv2.contourArea(cnt) < 300: 
             continue
+            
         x, y, w, h = cv2.boundingRect(cnt)
         aspect = float(w) / h
         
-        if (is_line and aspect > 3.0) or (not is_line and 0.5 < aspect < 2.0):
+        if is_line:
+            if aspect > 3.0:
+                found.append({'cx': x + w // 2})
+        else:
             found.append({'cx': x + w // 2})
+            
     return found
 
 def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
