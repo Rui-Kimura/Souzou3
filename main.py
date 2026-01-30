@@ -692,7 +692,12 @@ def find_shape_info(mask, is_line=False):
             found.append({'cx': x + w // 2})
     return found
 
-def get_jan_code_value(camera_id=0, timeout_sec=25):
+def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
+    """
+    JANコードを読み取る。
+    target_id が指定されている場合、そのIDが見つかるまで（またはタイムアウトまで）
+    他のIDを無視して探索を続ける。
+    """
     cap = cv2.VideoCapture(camera_id)
     if not cap.isOpened():
         print("Error: カメラを起動できませんでした。")
@@ -705,7 +710,7 @@ def get_jan_code_value(camera_id=0, timeout_sec=25):
         while True:
             if timeout_sec is not None:
                 if (time.time() - start_time) > timeout_sec:
-                    print("Timeout: バーコードが見つかりませんでした。")
+                    print("Timeout: 指定されたバーコードが見つかりませんでした。")
                     return None
 
             ret, frame = cap.read()
@@ -723,8 +728,21 @@ def get_jan_code_value(camera_id=0, timeout_sec=25):
             barcodes = decode(roi_img, symbols=[ZBarSymbol.EAN13, ZBarSymbol.EAN8])
 
             if len(barcodes) > 0:
-                detected_value = barcodes[0].data.decode('utf-8')
-                return detected_value
+                # 検出されたすべてのバーコードを確認
+                for barcode in barcodes:
+                    detected_value = barcode.data.decode('utf-8')
+                    
+                    # ターゲット指定がある場合、一致するか確認
+                    if target_id is not None:
+                        if detected_value == target_id:
+                            print(f"Target found: {detected_value}")
+                            return detected_value
+                        else:
+                            # 違うIDが見えた場合はログを出して無視（探索継続）
+                            print(f"Ignored: {detected_value} (Expected: {target_id})")
+                    else:
+                        # ターゲット指定がない場合は最初に見つけたものを返す
+                        return detected_value
                 
     finally:
         cap.release()
@@ -840,25 +858,28 @@ def return_table():
     global holding_table_id
     if holding_table_id is None:
         return None
+    move_linear(1)
     FoundEmpty = find_empty_stock()
     if FoundEmpty:
         move_linear(0)
         time.sleep(0.5)
         move_linear(1)
-        time.sleep(1)
+        start_time = time.time()
+        time.sleep(2)
         move_linear(0)
         arduino.send_command('r')
         time.sleep(1)
         arduino.send_command('o')
         time.sleep(5)
         move_linear(-1)
-        time.sleep(1.5)
+        time.sleep(2.5)
         move_linear(0)
         arduino.send_command('c')
         time.sleep(5)
         arduino.send_command('g')
         move_linear(-1)
-        time.sleep(24)
+        elapsed_time = time.time() - start_time
+        time.sleep(max(0, 25 - elapsed_time+2))
         move_linear(0)
         holding_table_id = None
 
@@ -871,7 +892,9 @@ def pick_table(target_table_id: str):
         return_table()
     
     move_linear(1)
-    detected_id = get_jan_code_value()
+    start_time = time.time()
+    detected_id = get_jan_code_value(target_id=target_table_id)
+    
     
     if detected_id is None:
         print("テーブルが発見できませんでした。")
@@ -883,13 +906,13 @@ def pick_table(target_table_id: str):
         move_linear(0)
         time.sleep(0.5)
         move_linear(-1)
-        time.sleep(1)
+        time.sleep(1.5)
         move_linear(0)
         arduino.send_command('r')
         arduino.send_command('o')
         time.sleep(5)
         move_linear(1)
-        time.sleep(1.5)
+        time.sleep(2)
         move_linear(0)
         arduino.send_command('c')
         time.sleep(5)
