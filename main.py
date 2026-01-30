@@ -752,7 +752,7 @@ class WebcamVideoStream:
         self.stream.release()
 
 # --- メイン処理関数 ---
-def find_empty_stock_bottom_focus(camera_id=0, timeout_sec=25):
+def find_empty_stock(camera_id=0, timeout_sec=25):
     vs = WebcamVideoStream(src=camera_id).start()
     time.sleep(1.0)
 
@@ -861,18 +861,31 @@ def find_shape_info(mask, is_line=False):
 
 def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
     """
-    JANコードを読み取る。
-    target_id が指定されている場合、そのIDが見つかるまで（またはタイムアウトまで）
-    他のIDを無視して探索を続ける。
+    JANコード読み取り（強化版）。
+    グレースケール、シャープ化、コントラスト調整を行い、読み取り率を向上させる。
     """
     cap = cv2.VideoCapture(camera_id)
+    
+    # 【改善点1】解像度を上げる（デフォルトが低い場合、細かいバーがつぶれるため）
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    # オートフォーカスが効くカメラなら有効化（0=OFF, 1=ON）
+    cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
+
     if not cap.isOpened():
         print("Error: カメラを起動できませんでした。")
         return None
 
-    SCAN_RATIO = 0.35 
+    SCAN_RATIO = 0.4  # 少し範囲を広げる
     start_time = time.time()
     
+    # シャープ化フィルタ（カーネル）の定義
+    kernel_sharpen = np.array([[0, -1, 0], 
+                               [-1, 5, -1], 
+                               [0, -1, 0]])
+
+    print("JAN Code Scanning Started...")
+
     try:
         while True:
             if timeout_sec is not None:
@@ -886,34 +899,62 @@ def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
 
             height, width = frame.shape[:2]
             
+            # ROI（読み取り範囲）の切り出し
             scan_h = int(height * SCAN_RATIO)
             center_y = height // 2
             top_y = center_y - (scan_h // 2)
             bottom_y = center_y + (scan_h // 2)
             roi_img = frame[top_y:bottom_y, 0:width]
 
-            barcodes = decode(roi_img, symbols=[ZBarSymbol.EAN13, ZBarSymbol.EAN8])
+            # --- 画像処理パイプライン ---
+            # 1つのフレームに対して、段階的に強い処理をかけて読み取りを試みる
+            
+            # Step 1: グレースケール（基本）
+            gray = cv2.cvtColor(roi_img, cv2.COLOR_BGR2GRAY)
+            
+            # Step 2: シャープ化（ブレ対策）
+            sharp = cv2.filter2D(gray, -1, kernel_sharpen)
+            
+            # Step 3: コントラスト強調（明暗強調）
+            # alpha=コントラスト(1.0-3.0), beta=明るさ(0-100)
+            enhanced = cv2.convertScaleAbs(gray, alpha=1.5, beta=10)
 
-            if len(barcodes) > 0:
-                # 検出されたすべてのバーコードを確認
-                for barcode in barcodes:
-                    detected_value = barcode.data.decode('utf-8')
-                    
-                    # ターゲット指定がある場合、一致するか確認
-                    if target_id is not None:
-                        if detected_value == target_id:
-                            print(f"Target found: {detected_value}")
-                            return detected_value
-                        else:
-                            # 違うIDが見えた場合はログを出して無視（探索継続）
-                            print(f"Ignored: {detected_value} (Expected: {target_id})")
-                    else:
-                        # ターゲット指定がない場合は最初に見つけたものを返す
-                        return detected_value
+            # 処理した画像リストを順に試す
+            # 普通のグレー画像 -> シャープ画像 -> コントラスト強調画像 の順でトライ
+            images_to_try = [gray, sharp, enhanced]
+
+            detected_value = None
+
+            for img in images_to_try:
+                barcodes = decode(img, symbols=[ZBarSymbol.EAN13, ZBarSymbol.EAN8])
                 
+                if len(barcodes) > 0:
+                    for barcode in barcodes:
+                        val = barcode.data.decode('utf-8')
+                        
+                        # ターゲット指定ありのロジック
+                        if target_id is not None:
+                            if val == target_id:
+                                detected_value = val
+                                break # ループを抜ける
+                            else:
+                                # デバッグ用に頻繁に出すぎないようコメントアウト推奨、必要なら残す
+                                # print(f"Ignored: {val}")
+                                pass
+                        else:
+                            detected_value = val
+                            break
+                
+                if detected_value:
+                    break # 画像処理ループを抜ける
+
+            # 見つかった場合
+            if detected_value:
+                print(f"Target found: {detected_value}")
+                return detected_value
+
     finally:
         cap.release()
-
 # ==========================================
 # Action & Navigation Logic
 # ==========================================
