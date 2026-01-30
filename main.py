@@ -1243,6 +1243,19 @@ def set_slide_move_endpoint(mode:str):
 
     return {"slide": mode}
 
+@app.get("/scan_barcode")
+def scan_barcode_api(timeout: int = 20):
+    """
+    ロボットのカメラを使用してJANコードをスキャンし、値を返す
+    """
+    print("Barcode scan requested via API...")
+    detected_id = get_jan_code_value(camera_id=0, timeout_sec=timeout)
+    
+    if detected_id:
+        return {"status": "success", "id": detected_id}
+    else:
+        return {"status": "error", "message": "Barcode not found or timeout"}
+
 @app.get("/table_data")
 def get_table_data_api():
     data = load_data_from_file()

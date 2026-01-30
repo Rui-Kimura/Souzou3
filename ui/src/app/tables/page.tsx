@@ -23,13 +23,13 @@ import {
   DialogActions,
   TextField,
   InputAdornment,
+  LinearProgress,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import EditIcon from "@mui/icons-material/Edit";
 import DeleteIcon from "@mui/icons-material/Delete";
 import QrCodeScannerIcon from "@mui/icons-material/QrCodeScanner";
-import BarcodeScannerComponent from "react-qr-barcode-scanner";
 
 interface TableItem {
   id: string;
@@ -48,7 +48,7 @@ export default function TablePage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [isEdit, setIsEdit] = useState(false);
-  const [isScanning, setIsScanning] = useState(false);
+  const [isScanning, setIsScanning] = useState(false); // バックエンドでのスキャン状態
   const [formData, setFormData] = useState<TableItem>({ id: "", name: "", memo: "" });
 
   const fetchData = async () => {
@@ -121,6 +121,30 @@ export default function TablePage() {
     }
   };
 
+  // --- ロボット側カメラでのスキャン実行 ---
+  const handleRobotScan = async () => {
+    setIsScanning(true);
+    setSnackMessage("ロボットがスキャンを開始しました...");
+    setSnackOpen(true);
+
+    try {
+      const res = await fetch("/api/local/scan_barcode");
+      const data = await res.json();
+
+      if (res.ok && data.status === "success") {
+        setFormData({ ...formData, id: data.id });
+        setSnackMessage(`読み取り完了: ${data.id}`);
+      } else {
+        setSnackMessage("スキャン失敗: " + (data.message || "タイムアウト"));
+      }
+    } catch (err) {
+      setSnackMessage("通信エラーが発生しました");
+    } finally {
+      setIsScanning(false);
+      setSnackOpen(true);
+    }
+  };
+
   const openAddDialog = () => {
     setIsEdit(false);
     setIsScanning(false);
@@ -188,7 +212,6 @@ export default function TablePage() {
                     elevation={isSelected ? 4 : 1}
                     onClick={() => handleCardClick(item.id)}
                     sx={{
-                      position: "relative",
                       borderRadius: 2,
                       borderLeft: 8,
                       borderColor: "#4db6ac",
@@ -260,48 +283,39 @@ export default function TablePage() {
             <TextField
               label="ID (JANコード)"
               fullWidth
-              disabled={isEdit}
+              disabled={isEdit || isScanning}
               value={formData.id}
               onChange={(e) => setFormData({ ...formData, id: e.target.value })}
               InputProps={{
                 endAdornment: !isEdit && (
                   <InputAdornment position="end">
-                    <IconButton color="primary" onClick={() => setIsScanning(!isScanning)} edge="end">
+                    <IconButton 
+                      color="primary" 
+                      onClick={handleRobotScan} 
+                      disabled={isScanning}
+                      edge="end"
+                    >
                       <QrCodeScannerIcon />
                     </IconButton>
                   </InputAdornment>
                 ),
               }}
+              helperText={isScanning ? "ロボットが読み取り中です..." : "右側のボタンでロボットのカメラからスキャン"}
             />
 
             {isScanning && (
-              <Box sx={{ width: "100%", overflow: "hidden", borderRadius: 2, bgcolor: "#000", position: "relative" }}>
-                <BarcodeScannerComponent
-                  width="100%"
-                  onUpdate={(err, result) => {
-                    if (result) {
-                      setFormData({ ...formData, id: result.getText() });
-                      setIsScanning(false);
-                      setSnackMessage("バーコードを読み取りました");
-                      setSnackOpen(true);
-                    }
-                  }}
-                />
-                <Button 
-                  fullWidth 
-                  variant="contained" 
-                  color="error" 
-                  onClick={() => setIsScanning(false)}
-                  sx={{ borderRadius: 0 }}
-                >
-                  キャンセル
-                </Button>
+              <Box sx={{ width: "100%" }}>
+                <LinearProgress color="primary" />
+                <Typography variant="caption" sx={{ mt: 1, display: "block", textAlign: "center" }}>
+                  カメラの前にバーコードをかざしてください
+                </Typography>
               </Box>
             )}
 
             <TextField
               label="名称"
               fullWidth
+              disabled={isScanning}
               value={formData.name}
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             />
@@ -310,16 +324,17 @@ export default function TablePage() {
               fullWidth
               multiline
               rows={3}
+              disabled={isScanning}
               value={formData.memo}
               onChange={(e) => setFormData({ ...formData, memo: e.target.value })}
             />
           </Stack>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setDialogOpen(false)} color="inherit">
+          <Button onClick={() => setDialogOpen(false)} color="inherit" disabled={isScanning}>
             キャンセル
           </Button>
-          <Button onClick={handleSave} variant="contained" sx={{ bgcolor: "#4db6ac" }}>
+          <Button onClick={handleSave} variant="contained" sx={{ bgcolor: "#4db6ac" }} disabled={isScanning}>
             保存する
           </Button>
         </DialogActions>
@@ -327,7 +342,7 @@ export default function TablePage() {
 
       <Snackbar
         open={snackOpen}
-        autoHideDuration={3000}
+        autoHideDuration={4000}
         onClose={() => setSnackOpen(false)}
         message={snackMessage}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}

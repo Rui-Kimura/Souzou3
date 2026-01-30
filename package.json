@@ -1,5 +1,3 @@
 {
-  "dependencies": {
-    "react-qr-barcode-scanner": "^2.1.22"
-  }
+  "dependencies": {}
 }
