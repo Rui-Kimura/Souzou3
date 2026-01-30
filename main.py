@@ -1752,7 +1752,8 @@ def main():
 
                             if IS_DEMO:
                                 move_distance_mm(500,100)
-                                # holding_table_id = pick_table(reserved_table_id)
+                                holding_table_id = pick_table(reserved_table_id)
+                                move_distance_mm(-500,100)
                             elif (is_at_pos and is_at_ang):
                                 holding_table_id = pick_table(reserved_table_id)
                             else:
