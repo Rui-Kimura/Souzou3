@@ -183,7 +183,7 @@ export default function TablePage() {
             {items.map((item) => {
               const isSelected = selectedId === item.id;
               return (
-                <Grid item xs={12} key={item.id}>
+                <Grid size={12} key={item.id}>
                   <Card
                     elevation={isSelected ? 4 : 1}
                     onClick={() => handleCardClick(item.id)}
