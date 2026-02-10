@@ -1113,7 +1113,7 @@ def return_table():
         arduino.send_command('c')
         time.sleep(5)
         move_linear(1)
-        time.sleep(1.5)
+        time.sleep(3)
         move_linear(0)
         arduino.send_command('r')
         time.sleep(1)
