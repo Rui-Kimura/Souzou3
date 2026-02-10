@@ -772,8 +772,8 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     start_time = time.time()
 
     # 色設定（感度高め）
-    lower_blue = np.array([100, 60, 0])
-    upper_blue = np.array([140, 255, 255])
+    lower_blue = np.array([80, 60, 0])
+    upper_blue = np.array([160, 255, 255])
     lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
 
@@ -1119,9 +1119,6 @@ def pick_table(target_table_id: str):
     time.sleep(1)
     if holding_table_id is not None:
         if return_table() is not None:
-            move_linear(-1)
-            time.sleep(25)
-            move_linear(0)
             return holding_table_id
     
     move_linear(1)
