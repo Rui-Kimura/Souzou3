@@ -762,21 +762,22 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         return False
 
     # --- 設定エリア ---
-    # 青検知エリアの高さ比率
+    # 青検知エリアの高さ（30%）
     SCAN_RATIO_SQUARE = 0.3 
-    # 赤線監視エリアの高さ比率
+    # 赤線監視エリアの高さ（50%）
     SCAN_RATIO_LINE   = 0.5 
     
     start_time = time.time()
+    saved_debug_image = False
 
-    # 色設定
-    # 青色（HSV）
-    lower_blue = np.array([100, 60, 0])
-    upper_blue = np.array([140, 255, 255])
+    # --- 色設定（検出されやすいように少し範囲を広げています） ---
+    # 青色（HSV）: 彩度(S)と明度(V)の下限を60→40に下げて暗い場所や薄い青に対応
+    lower_blue = np.array([90, 40, 40])
+    upper_blue = np.array([150, 255, 255])
     
-    # 赤色（HSV） - 0~10 と 170~180 の2範囲を統合
-    lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
-    lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
+    # 赤色（HSV）
+    lower_red1, upper_red1 = np.array([0, 100, 60]), np.array([10, 255, 255])
+    lower_red2, upper_red2 = np.array([170, 100, 60]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
     print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s")
@@ -791,14 +792,13 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             frame = vs.read()
             if frame is None: continue
 
-            # --- ここから移植したロジック ---
+            # --- 移植箇所：画面中央基準のROI計算 ---
             height, width = frame.shape[:2]
             center_y = height // 2
 
-            # 表示用フレーム（描画はここに行う / デバッグ保存用）
+            # 表示用フレーム（描画はここに行う）
             display_frame = frame.copy()
 
-            # --- ROI（関心領域）の計算 ---
             # 1. 青四角用（狭いエリア）
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
             top_sq = center_y - (scan_h_sq // 2)
@@ -808,12 +808,12 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             scan_h_li = int(height * SCAN_RATIO_LINE)
             top_li = center_y - (scan_h_li // 2)
             bottom_li = center_y + (scan_h_li // 2)
-            
-            # 画面外にはみ出さないよう調整（念のため）
-            if top_sq < 0: top_sq = 0
-            if bottom_sq > height: bottom_sq = height
-            if top_li < 0: top_li = 0
-            if bottom_li > height: bottom_li = height
+
+            # 画面外エラー回避
+            top_sq = max(0, top_sq)
+            bottom_sq = min(height, bottom_sq)
+            top_li = max(0, top_li)
+            bottom_li = min(height, bottom_li)
 
             # --- ガイド枠の描画 ---
             # 黄色枠：赤線監視エリア（広い）
@@ -821,11 +821,15 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             # 白色枠：青検知エリア（狭い）
             cv2.rectangle(display_frame, (0, top_sq), (width, bottom_sq), (255, 255, 255), 1)
 
-            # --- ROIの切り出し ---
+            if not saved_debug_image:
+                cv2.imwrite("debug_view.jpg", display_frame)
+                print("Debug image saved to 'debug_view.jpg'. Please check the area.")
+                saved_debug_image = True
+
+            # ROI切り出し
             roi_sq = frame[top_sq:bottom_sq, 0:width]
             roi_li = frame[top_li:bottom_li, 0:width]
-            # ---------------------------
-
+            
             # 画像処理
             hsv_sq = cv2.cvtColor(roi_sq, cv2.COLOR_BGR2HSV)
             hsv_li = cv2.cvtColor(roi_li, cv2.COLOR_BGR2HSV)
@@ -834,28 +838,23 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             mask_red = cv2.addWeighted(cv2.inRange(hsv_li, lower_red1, upper_red1), 1.0,
                                        cv2.inRange(hsv_li, lower_red2, upper_red2), 1.0, 0)
 
-            # 膨張処理（ブレ対策）
+            # ノイズ除去
             mask_blue = cv2.dilate(mask_blue, kernel, iterations=2)
             mask_red = cv2.dilate(mask_red, kernel, iterations=2)
 
             # 形状検出
-            # is_line=False なのでアスペクト比を見ず、面積があれば検知します
             blue_rects = find_shape_info(mask_blue, is_line=False)
             red_lines = find_shape_info(mask_red, is_line=True)
 
             has_blue = len(blue_rects) > 0
             has_red_line = len(red_lines) > 0
 
-            # デバッグ用：何が見えているか確認したい場合は以下のコメントを外して保存
-            # if elapsed < 1.0:
-            #     cv2.imwrite("debug_view.jpg", display_frame)
-
             if has_blue:
                 if has_red_line:
-                    # 赤線がある場合はまだ動いている途中か、禁止エリアと判断してスルー
+                    # 赤線がある場合は無視（移動中または禁止エリア）
                     continue
                 else:
-                    print("\nSuccess: Blue detected & Safe.")
+                    print(f"\nSuccess: Blue detected at {blue_rects[0]['cx']}")
                     return True
             
             time.sleep(0.01)
@@ -867,7 +866,7 @@ def find_shape_info(mask, is_line=False):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     found = []
     for cnt in contours:
-        if cv2.contourArea(cnt) < 300: 
+        if cv2.contourArea(cnt) < 100: 
             continue
         x, y, w, h = cv2.boundingRect(cnt)
         aspect = float(w) / h
