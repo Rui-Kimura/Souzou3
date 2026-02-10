@@ -1119,6 +1119,9 @@ def pick_table(target_table_id: str):
     time.sleep(1)
     if holding_table_id is not None:
         if return_table() is not None:
+            move_linear(-1)
+            time.sleep(25)
+            move_linear(0)
             return holding_table_id
     
     move_linear(1)
