@@ -574,7 +574,7 @@ def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
     
     # 補正用ゲイン（直進時のふらつきを抑えるための係数）
     # KP_TURNだと回転用で強すぎる場合があるため、必要に応じて調整してください
-    KP_STRAIGHT = 3.0
+    KP_STRAIGHT = 2.0
 
     with position_lock:
         start_x = robot.x
@@ -737,6 +737,7 @@ class WebcamVideoStream:
         self.stopped = False
 
     def start(self):
+        # 修正: Thread -> threading.Thread
         threading.Thread(target=self.update, args=(), daemon=True).start()
         return self
 
@@ -766,25 +767,25 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         return False
 
     # --- 設定エリア ---
-    # 青検知エリアの高さ（30%）
-    SCAN_RATIO_SQUARE = 0.3 
-    # 赤線監視エリアの高さ（50%）
-    SCAN_RATIO_LINE   = 0.5 
+    SCAN_RATIO_SQUARE = 0.3  # 青検知エリアの高さ（30%）
+    SCAN_RATIO_LINE   = 0.5  # 赤線監視エリアの高さ（50%）
     
+    # 0.5 = 中央, 0.75 = 下寄り
+    VERTICAL_POS_BLUE = 0.75 
+    VERTICAL_POS_RED  = 0.50 
+
     start_time = time.time()
     saved_debug_image = False
 
-    # --- 色設定（検出されやすいように少し範囲を広げています） ---
-    # 青色（HSV）: 彩度(S)と明度(V)の下限を60→40に下げて暗い場所や薄い青に対応
+    # --- 色設定 ---
     lower_blue = np.array([90, 40, 40])
     upper_blue = np.array([150, 255, 255])
     
-    # 赤色（HSV）
     lower_red1, upper_red1 = np.array([0, 100, 60]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 100, 60]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s", flush=True)
+    print(f"Monitoring started (Bottom Focus). Timeout: {timeout_sec}s", flush=True)
 
     try:
         while True:
@@ -796,33 +797,35 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             frame = vs.read()
             if frame is None: continue
 
-            # --- 移植箇所：画面中央基準のROI計算 ---
             height, width = frame.shape[:2]
-            center_y = height // 2
 
-            # 表示用フレーム（描画はここに行う）
+            # 表示用フレーム
             display_frame = frame.copy()
 
-            # 1. 青四角用（狭いエリア）
+            # --- 1. 青色検知エリア（画面下寄り）の計算 ---
+            center_y_blue = int(height * VERTICAL_POS_BLUE)
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
-            top_sq = center_y - (scan_h_sq // 2)
-            bottom_sq = center_y + (scan_h_sq // 2)
-
-            # 2. 赤線用（広いエリア）
+            top_sq = center_y_blue - (scan_h_sq // 2)
+            bottom_sq = center_y_blue + (scan_h_sq // 2)
+            
+            # Check bounds
+            if top_sq < 0: top_sq = 0
+            if bottom_sq > height: bottom_sq = height
+            
+            # --- 2. 赤線監視エリア（画面中央）の計算 ---
+            center_y_red = int(height * VERTICAL_POS_RED)
             scan_h_li = int(height * SCAN_RATIO_LINE)
-            top_li = center_y - (scan_h_li // 2)
-            bottom_li = center_y + (scan_h_li // 2)
+            top_li = center_y_red - (scan_h_li // 2)
+            bottom_li = center_y_red + (scan_h_li // 2)
+            
+            # Check bounds
+            if top_li < 0: top_li = 0
+            if bottom_li > height: bottom_li = height
 
-            # 画面外エラー回避
-            top_sq = max(0, top_sq)
-            bottom_sq = min(height, bottom_sq)
-            top_li = max(0, top_li)
-            bottom_li = min(height, bottom_li)
-
-            # --- ガイド枠の描画 ---
-            # 黄色枠：赤線監視エリア（広い）
+            # --- デバッグ用描画 ---
+            # 黄色枠：赤線（中央）
             cv2.rectangle(display_frame, (0, top_li), (width, bottom_li), (0, 255, 255), 1)
-            # 白色枠：青検知エリア（狭い）
+            # 白色枠：青（下寄り）
             cv2.rectangle(display_frame, (0, top_sq), (width, bottom_sq), (255, 255, 255), 1)
 
             if not saved_debug_image:
