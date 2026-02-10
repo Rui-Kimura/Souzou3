@@ -762,23 +762,24 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         return False
 
     # --- 設定エリア ---
-    SCAN_RATIO_SQUARE = 0.4  # 青検知エリアの高さ（30%）
-    SCAN_RATIO_LINE   = 0.5  # 赤線監視エリアの高さ（50%）
+    # 青検知エリアの高さ比率
+    SCAN_RATIO_SQUARE = 0.3 
+    # 赤線監視エリアの高さ比率
+    SCAN_RATIO_LINE   = 0.5 
     
-    # 0.5 = 中央, 0.75 = 下寄り, 0.25 = 上寄り
-    VERTICAL_POS_BLUE = 0.65 
-    VERTICAL_POS_RED  = 0.50 # 赤線は全体を見たいので中央のまま
-
     start_time = time.time()
 
-    # 色設定（感度高め）
-    lower_blue = np.array([80, 60, 0])
-    upper_blue = np.array([160, 255, 255])
+    # 色設定
+    # 青色（HSV）
+    lower_blue = np.array([100, 60, 0])
+    upper_blue = np.array([140, 255, 255])
+    
+    # 赤色（HSV） - 0~10 と 170~180 の2範囲を統合
     lower_red1, upper_red1 = np.array([0, 120, 70]), np.array([10, 255, 255])
     lower_red2, upper_red2 = np.array([170, 120, 70]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Bottom Focus). Timeout: {timeout_sec}s")
+    print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s")
 
     try:
         while True:
@@ -790,26 +791,40 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             frame = vs.read()
             if frame is None: continue
 
+            # --- ここから移植したロジック ---
             height, width = frame.shape[:2]
+            center_y = height // 2
 
-            # --- 1. 青色検知エリア（画面下寄り）の計算 ---
-            center_y_blue = int(height * VERTICAL_POS_BLUE)
+            # 表示用フレーム（描画はここに行う / デバッグ保存用）
+            display_frame = frame.copy()
+
+            # --- ROI（関心領域）の計算 ---
+            # 1. 青四角用（狭いエリア）
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
-            top_sq = center_y_blue - (scan_h_sq // 2)
-            bottom_sq = center_y_blue + (scan_h_sq // 2)
+            top_sq = center_y - (scan_h_sq // 2)
+            bottom_sq = center_y + (scan_h_sq // 2)
+
+            # 2. 赤線用（広いエリア）
+            scan_h_li = int(height * SCAN_RATIO_LINE)
+            top_li = center_y - (scan_h_li // 2)
+            bottom_li = center_y + (scan_h_li // 2)
             
-            # 画面外にはみ出さないよう調整
+            # 画面外にはみ出さないよう調整（念のため）
             if top_sq < 0: top_sq = 0
             if bottom_sq > height: bottom_sq = height
-            
-            roi_sq = frame[top_sq:bottom_sq, 0:width]
+            if top_li < 0: top_li = 0
+            if bottom_li > height: bottom_li = height
 
-            # --- 2. 赤線監視エリア（画面全体）の計算 ---
-            center_y_red = int(height * VERTICAL_POS_RED)
-            scan_h_li = int(height * SCAN_RATIO_LINE)
-            top_li = center_y_red - (scan_h_li // 2)
-            bottom_li = center_y_red + (scan_h_li // 2)
+            # --- ガイド枠の描画 ---
+            # 黄色枠：赤線監視エリア（広い）
+            cv2.rectangle(display_frame, (0, top_li), (width, bottom_li), (0, 255, 255), 1)
+            # 白色枠：青検知エリア（狭い）
+            cv2.rectangle(display_frame, (0, top_sq), (width, bottom_sq), (255, 255, 255), 1)
+
+            # --- ROIの切り出し ---
+            roi_sq = frame[top_sq:bottom_sq, 0:width]
             roi_li = frame[top_li:bottom_li, 0:width]
+            # ---------------------------
 
             # 画像処理
             hsv_sq = cv2.cvtColor(roi_sq, cv2.COLOR_BGR2HSV)
@@ -823,18 +838,24 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             mask_blue = cv2.dilate(mask_blue, kernel, iterations=2)
             mask_red = cv2.dilate(mask_red, kernel, iterations=2)
 
-            # 形状検出（条件緩和版）
+            # 形状検出
+            # is_line=False なのでアスペクト比を見ず、面積があれば検知します
             blue_rects = find_shape_info(mask_blue, is_line=False)
             red_lines = find_shape_info(mask_red, is_line=True)
 
             has_blue = len(blue_rects) > 0
             has_red_line = len(red_lines) > 0
 
+            # デバッグ用：何が見えているか確認したい場合は以下のコメントを外して保存
+            # if elapsed < 1.0:
+            #     cv2.imwrite("debug_view.jpg", display_frame)
+
             if has_blue:
                 if has_red_line:
+                    # 赤線がある場合はまだ動いている途中か、禁止エリアと判断してスルー
                     continue
                 else:
-                    print("\nSuccess: Blue detected (Bottom) & Safe.")
+                    print("\nSuccess: Blue detected & Safe.")
                     return True
             
             time.sleep(0.01)
