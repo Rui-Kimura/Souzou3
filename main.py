@@ -768,12 +768,8 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
     # --- 設定エリア ---
     SCAN_RATIO_SQUARE = 0.3  # 青検知エリアの高さ（30%）
-    SCAN_RATIO_LINE   = 0.5  # 赤線監視エリアの高さ（50%）
+    SCAN_RATIO_LINE   = 0.7
     
-    # 0.5 = 中央, 0.75 = 下寄り
-    VERTICAL_POS_BLUE = 0.75 
-    VERTICAL_POS_RED  = 0.50 
-
     start_time = time.time()
     saved_debug_image = False
 
@@ -785,7 +781,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     lower_red2, upper_red2 = np.array([170, 100, 60]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Bottom Focus). Timeout: {timeout_sec}s", flush=True)
+    print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s", flush=True)
 
     try:
         while True:
@@ -797,35 +793,31 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             frame = vs.read()
             if frame is None: continue
 
+            # --- ROI（関心領域）の計算 ---
             height, width = frame.shape[:2]
-
-            # 表示用フレーム
+            center_y = height // 2
             display_frame = frame.copy()
 
-            # --- 1. 青色検知エリア（画面下寄り）の計算 ---
-            center_y_blue = int(height * VERTICAL_POS_BLUE)
+            # 1. 青四角用（狭いエリア）
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
-            top_sq = center_y_blue - (scan_h_sq // 2)
-            bottom_sq = center_y_blue + (scan_h_sq // 2)
-            
-            # Check bounds
-            if top_sq < 0: top_sq = 0
-            if bottom_sq > height: bottom_sq = height
-            
-            # --- 2. 赤線監視エリア（画面中央）の計算 ---
-            center_y_red = int(height * VERTICAL_POS_RED)
-            scan_h_li = int(height * SCAN_RATIO_LINE)
-            top_li = center_y_red - (scan_h_li // 2)
-            bottom_li = center_y_red + (scan_h_li // 2)
-            
-            # Check bounds
-            if top_li < 0: top_li = 0
-            if bottom_li > height: bottom_li = height
+            top_sq = center_y - (scan_h_sq // 2)
+            bottom_sq = center_y + (scan_h_sq // 2)
 
-            # --- デバッグ用描画 ---
-            # 黄色枠：赤線（中央）
+            # 2. 赤線用（広いエリア）
+            scan_h_li = int(height * SCAN_RATIO_LINE)
+            top_li = center_y - (scan_h_li // 2)
+            bottom_li = center_y + (scan_h_li // 2)
+
+            # 画面外エラー回避
+            top_sq = max(0, top_sq)
+            bottom_sq = min(height, bottom_sq)
+            top_li = max(0, top_li)
+            bottom_li = min(height, bottom_li)
+
+            # --- ガイド枠の描画 ---
+            # 黄色枠：赤線監視エリア（広い）
             cv2.rectangle(display_frame, (0, top_li), (width, bottom_li), (0, 255, 255), 1)
-            # 白色枠：青（下寄り）
+            # 白色枠：青検知エリア（狭い）
             cv2.rectangle(display_frame, (0, top_sq), (width, bottom_sq), (255, 255, 255), 1)
 
             if not saved_debug_image:
@@ -859,6 +851,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             if has_blue:
                 if has_red_line:
                     # 赤線がある場合は無視（移動中または禁止エリア）
+                    # print("Red detected -> Ignored", flush=True)
                     continue
                 else:
                     print(f"\nSuccess: Blue detected at {blue_rects[0]['cx']}", flush=True)
@@ -879,7 +872,7 @@ def find_shape_info(mask, is_line=False):
         aspect = float(w) / h
         
         if is_line:
-            if aspect > 3.0:
+            if aspect > 1.5: # 条件緩和
                 found.append({'cx': x + w // 2})
         else:
             found.append({'cx': x + w // 2})
@@ -1116,7 +1109,7 @@ def return_table():
         arduino.send_command('c')
         time.sleep(5)
         move_linear(1)
-        time.sleep(3)
+        time.sleep(1.5)
         move_linear(0)
         arduino.send_command('r')
         time.sleep(1)
