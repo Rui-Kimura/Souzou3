@@ -733,7 +733,7 @@ class WebcamVideoStream:
         self.stopped = False
 
     def start(self):
-        Thread(target=self.update, args=(), daemon=True).start()
+        threading.Thread(target=self.update, args=(), daemon=True).start()
         return self
 
     def update(self):
