@@ -762,11 +762,11 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         return False
 
     # --- 設定エリア ---
-    SCAN_RATIO_SQUARE = 0.3  # 青検知エリアの高さ（30%）
+    SCAN_RATIO_SQUARE = 0.4  # 青検知エリアの高さ（30%）
     SCAN_RATIO_LINE   = 0.5  # 赤線監視エリアの高さ（50%）
     
     # 0.5 = 中央, 0.75 = 下寄り, 0.25 = 上寄り
-    VERTICAL_POS_BLUE = 0.75 
+    VERTICAL_POS_BLUE = 0.65 
     VERTICAL_POS_RED  = 0.50 # 赤線は全体を見たいので中央のまま
 
     start_time = time.time()
