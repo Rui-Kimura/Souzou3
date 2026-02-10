@@ -270,7 +270,7 @@ class ArduinoController:
         if self.port_name:
             self._connect()
         else:
-            print("Arduinoが見つかりません。")
+            print("Arduinoが見つかりません。", flush=True)
             self.ser = None
 
     def _find_arduino_port(self):
@@ -282,12 +282,12 @@ class ArduinoController:
 
     def _connect(self):
         try:
-            print(f"Arduinoを {self.port_name} で検出。接続中...")
+            print(f"Arduinoを {self.port_name} で検出。接続中...", flush=True)
             self.ser = serial.Serial(self.port_name, self.baudrate, timeout=1)
             time.sleep(2)
             
         except serial.SerialException as e:
-            print(f"Arduino接続エラー: {e}")
+            print(f"Arduino接続エラー: {e}", flush=True)
             self.ser = None
 
     def send_command(self, command):
@@ -296,16 +296,16 @@ class ArduinoController:
                 data = command.encode('utf-8')
                 self.ser.write(data)
                 self.ser.flush() 
-                print(f">> Arduinoへコマンド '{command}' を送信しました")
+                print(f">> Arduinoへコマンド '{command}' を送信しました", flush=True)
             except serial.SerialException as e:
-                print(f"送信エラー: {e}")
+                print(f"送信エラー: {e}", flush=True)
         else:
-            print(f"エラー: Arduinoが接続されていないため '{command}' を送信できません")
+            print(f"エラー: Arduinoが接続されていないため '{command}' を送信できません", flush=True)
 
     def close(self):
         if self.ser and self.ser.is_open:
             self.ser.close()
-            print("Arduino接続を終了しました。")
+            print("Arduino接続を終了しました。", flush=True)
 
 class RobotState:
     def __init__(self, start_x, start_y, start_heading):
@@ -406,7 +406,7 @@ class PathPlanner:
                             stocker_safe_indices.append(self._to_grid(sx, sy, s_ang, x_off, y_off))
 
             except Exception as e:
-                print(f"Stocker load error: {e}")
+                print(f"Stocker load error: {e}", flush=True)
 
         cost_map = np.zeros_like(temp_obstacle_map)
         obstacles = np.argwhere(temp_obstacle_map == 1)
@@ -433,18 +433,18 @@ class PathPlanner:
         goal = tuple(goal_grid)
 
         if not (0 <= start[0] < self.width and 0 <= start[1] < self.height):
-             print(f"エラー: スタート地点 {start} がマップ範囲外です")
+             print(f"エラー: スタート地点 {start} がマップ範囲外です", flush=True)
              return None
         if not (0 <= goal[0] < self.width and 0 <= goal[1] < self.height):
-             print(f"エラー: ゴール地点 {goal} がマップ範囲外です")
+             print(f"エラー: ゴール地点 {goal} がマップ範囲外です", flush=True)
              return None
 
         if self.cost_map[goal[1]][goal[0]] == 1:
-            print("エラー: ゴール地点が障害物内または到達不能エリアです")
+            print("エラー: ゴール地点が障害物内または到達不能エリアです", flush=True)
             return None
 
         if self.cost_map[start[1]][start[0]] == 1:
-            print("警告: スタート地点が障害物内です。近傍を探索します。")
+            print("警告: スタート地点が障害物内です。近傍を探索します。", flush=True)
             found = False
             for dy in range(-2, 3):
                 for dx in range(-2, 3):
@@ -456,7 +456,7 @@ class PathPlanner:
                             break
                 if found: break
             if not found:
-                print("エラー: スタート地点周辺に安全な場所が見つかりません")
+                print("エラー: スタート地点周辺に安全な場所が見つかりません", flush=True)
                 return None
 
         open_set = []
@@ -561,7 +561,7 @@ def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
     global robot
     
     if robot is None:
-        print("Error: Robot is not initialized.")
+        print("Error: Robot is not initialized.", flush=True)
         return
 
     # --- 初期設定 ---
@@ -578,7 +578,7 @@ def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
         # 動き出した瞬間の角度を「維持すべき目標角度」とする
         target_heading = robot.heading
 
-    print(f"Move start: {dist_mm}mm (Heading Target: {target_heading:.1f})")
+    print(f"Move start: {dist_mm}mm (Heading Target: {target_heading:.1f})", flush=True)
 
     try:
         while True:
@@ -621,11 +621,11 @@ def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
             time.sleep(0.02) # 制御ループ周期
 
     except KeyboardInterrupt:
-        print("Move interrupted.")
+        print("Move interrupted.", flush=True)
     finally:
         # 確実に停止
         set_motor_speed(0, 0, brake=True)
-        print(f"Move finished. Covered: {distance_covered:.1f}mm")
+        print(f"Move finished. Covered: {distance_covered:.1f}mm", flush=True)
 
 
 def rotate_angle_deg(rel_deg: float):
@@ -638,7 +638,7 @@ def rotate_angle_deg(rel_deg: float):
     global robot
 
     if robot is None:
-        print("Error: Robot is not initialized.")
+        print("Error: Robot is not initialized.", flush=True)
         return
 
     with position_lock:
@@ -646,7 +646,7 @@ def rotate_angle_deg(rel_deg: float):
     
     target_heading = (start_heading + rel_deg) % 360
     
-    print(f"Rotate start: {rel_deg} deg (Target: {target_heading:.1f})")
+    print(f"Rotate start: {rel_deg} deg (Target: {target_heading:.1f})", flush=True)
 
     try:
         while True:
@@ -673,10 +673,10 @@ def rotate_angle_deg(rel_deg: float):
             time.sleep(0.02)
 
     except KeyboardInterrupt:
-        print("Rotate interrupted.")
+        print("Rotate interrupted.", flush=True)
     finally:
         set_motor_speed(0, 0, brake=True)
-        print("Rotate finished.")
+        print("Rotate finished.", flush=True)
 
 def move_linear(status):
     if status == 1:
@@ -757,7 +757,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     time.sleep(1.0)
 
     if vs.read() is None:
-        print("Error: カメラ映像が取得できません。")
+        print("Error: カメラ映像が取得できません。", flush=True)
         vs.stop()
         return False
 
@@ -780,13 +780,13 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     lower_red2, upper_red2 = np.array([170, 100, 60]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s")
+    print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s", flush=True)
 
     try:
         while True:
             elapsed = time.time() - start_time
             if elapsed > timeout_sec:
-                print("\nTimeout.")
+                print("\nTimeout.", flush=True)
                 return False
 
             frame = vs.read()
@@ -823,7 +823,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
             if not saved_debug_image:
                 cv2.imwrite("debug_view.jpg", display_frame)
-                print("Debug image saved to 'debug_view.jpg'. Please check the area.")
+                print("Debug image saved to 'debug_view.jpg'. Please check the area.", flush=True)
                 saved_debug_image = True
 
             # ROI切り出し
@@ -854,7 +854,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
                     # 赤線がある場合は無視（移動中または禁止エリア）
                     continue
                 else:
-                    print(f"\nSuccess: Blue detected at {blue_rects[0]['cx']}")
+                    print(f"\nSuccess: Blue detected at {blue_rects[0]['cx']}", flush=True)
                     return True
             
             time.sleep(0.01)
@@ -893,7 +893,7 @@ def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
     cap.set(cv2.CAP_PROP_AUTOFOCUS, 1)
 
     if not cap.isOpened():
-        print("Error: カメラを起動できませんでした。")
+        print("Error: カメラを起動できませんでした。", flush=True)
         return None
 
     SCAN_RATIO = 0.4  # 少し範囲を広げる
@@ -904,13 +904,13 @@ def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
                                [-1, 5, -1], 
                                [0, -1, 0]])
 
-    print("JAN Code Scanning Started...")
+    print("JAN Code Scanning Started...", flush=True)
 
     try:
         while True:
             if timeout_sec is not None:
                 if (time.time() - start_time) > timeout_sec:
-                    print("Timeout: 指定されたバーコードが見つかりませんでした。")
+                    print("Timeout: 指定されたバーコードが見つかりませんでした。", flush=True)
                     return None
 
             ret, frame = cap.read()
@@ -959,7 +959,7 @@ def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
                                 break # ループを抜ける
                             else:
                                 # デバッグ用に頻繁に出すぎないようコメントアウト推奨、必要なら残す
-                                # print(f"Ignored: {val}")
+                                # print(f"Ignored: {val}", flush=True)
                                 pass
                         else:
                             detected_value = val
@@ -970,7 +970,7 @@ def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
 
             # 見つかった場合
             if detected_value:
-                print(f"Target found: {detected_value}")
+                print(f"Target found: {detected_value}", flush=True)
                 return detected_value
 
     finally:
@@ -986,11 +986,11 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     with position_lock:
         start_grid = robot.get_grid_pos()
     
-    print(f"Start: {start_grid} -> Goal: {goal_grid}")
+    print(f"Start: {start_grid} -> Goal: {goal_grid}", flush=True)
     path = _planner.get_path_astar(start_grid, goal_grid)
     
     if not path:
-        print("経路なし")
+        print("経路なし", flush=True)
         return False
     
     state_turning = True 
@@ -1004,7 +1004,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
             next_target_x_mm = target_x_mm
             next_target_y_mm = target_y_mm
         
-        print(f"Next WP: ({next_target_x_mm:.0f}, {next_target_y_mm:.0f})")
+        print(f"Next WP: ({next_target_x_mm:.0f}, {next_target_y_mm:.0f})", flush=True)
 
         while True:            
             with position_lock:
@@ -1026,7 +1026,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
 
             diff = normalize_angle_diff(target_deg, ch)
             if abs(diff) > 170:
-                print(f"U-Turn Mode: Diff={diff:.1f}")
+                print(f"U-Turn Mode: Diff={diff:.1f}", flush=True)
                 set_motor_speed(70, -70) 
                 time.sleep(0.05)
                 continue
@@ -1058,7 +1058,7 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
 
     set_motor_speed(0, 0)
     
-    print(f"Aligning to final angle: {target_angle:.1f}")
+    print(f"Aligning to final angle: {target_angle:.1f}", flush=True)
     align_start_time = time.time()
     while time.time() - align_start_time < 5.0:
         with position_lock:
@@ -1083,14 +1083,14 @@ def move_to_target(_planner, robot, sensor_bno, sensor_pmw, target_pos_mm):
     return True
 
 def return_table():
-    print("空いている棚を探しています...")
+    print("空いている棚を探しています...", flush=True)
     global holding_table_id
     if holding_table_id is None:
         return None
     move_linear(1)
     FoundEmpty = find_empty_stock()
     if FoundEmpty:
-        print("空いている棚を発見しました。テーブルを戻します。")
+        print("空いている棚を発見しました。テーブルを戻します。", flush=True)
         move_linear(0)
         time.sleep(0.5)
         move_distance_mm(20, speed=80)
@@ -1126,7 +1126,7 @@ def return_table():
         holding_table_id = None
         return None
     else:
-        print("空いている棚が見つかりませんでした。")
+        print("空いている棚が見つかりませんでした。", flush=True)
         move_linear(-1)
         time.sleep(25)
         move_linear(0)
@@ -1147,7 +1147,7 @@ def pick_table(target_table_id: str):
     
     
     if detected_id is None:
-        print("テーブルが発見できませんでした。")
+        print("テーブルが発見できませんでした。", flush=True)
         move_linear(-1)
         time.sleep(25)
         move_linear(0)
@@ -1229,7 +1229,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 manual_speed = message["speed"] / 5.0
                 manual_angle = message["angle"]
                 manual_rotate = message["rotate"]
-                print(f"受信データ: direction={manual_direction}, speed={manual_speed}, angle={manual_angle}, rotate={manual_rotate}")
+                print(f"受信データ: direction={manual_direction}, speed={manual_speed}, angle={manual_angle}, rotate={manual_rotate}", flush=True)
             
             elif msg_type == "manual_mode":
                 global manual_control
@@ -1244,17 +1244,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     manual_linear = -1
                 else:
                     manual_linear = 0
-                print(f"Linear Command Received: {mode}")
+                print(f"Linear Command Received: {mode}", flush=True)
 
             elif msg_type == "slide":
                 mode = message["mode"]
-                print(f"Slide Command Received: {mode}")
+                print(f"Slide Command Received: {mode}", flush=True)
                 if mode == "open":
                     arduino.send_command('o')
                 elif mode == "close":
                     arduino.send_command('c')
                 else:
-                    print(f"Unknown slide mode: {mode}")
+                    print(f"Unknown slide mode: {mode}", flush=True)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
@@ -1482,7 +1482,7 @@ def control_robot_api(
     manual_speed = speed / 5.0
     manual_angle = angle
     manual_rotate = rotate
-    print(f"受信データ: direction={direction}, speed={manual_speed}, angle={angle}, rotate={rotate}")
+    print(f"受信データ: direction={direction}, speed={manual_speed}, angle={angle}, rotate={rotate}", flush=True)
     return {
         "status": "controlled"
     }
@@ -1510,14 +1510,14 @@ def set_linear_move_endpoint(mode:str):
 
 @app.get("/slide")
 def set_slide_move_endpoint(mode:str):
-    print(f"Slide Command Received: {mode}")
+    print(f"Slide Command Received: {mode}", flush=True)
     
     if mode == "open":
         arduino.send_command('o')
     elif mode == "close":
         arduino.send_command('c')
     else:
-        print(f"Unknown slide mode: {mode}")
+        print(f"Unknown slide mode: {mode}", flush=True)
 
     return {"slide": mode}
 
@@ -1526,7 +1526,7 @@ def scan_barcode_api(timeout: int = 20):
     """
     ロボットのカメラを使用してJANコードをスキャンし、値を返す
     """
-    print("Barcode scan requested via API...")
+    print("Barcode scan requested via API...", flush=True)
     detected_id = get_jan_code_value(camera_id=0, timeout_sec=timeout)
     
     if detected_id:
@@ -1595,7 +1595,7 @@ def is_demo():
 def set_is_demo(mode: bool):
     global IS_DEMO
     IS_DEMO = mode
-    print(f"Demo Mode: {IS_DEMO}")
+    print(f"Demo Mode: {IS_DEMO}", flush=True)
     return {"demo_mode": IS_DEMO}
 
 # ==========================================
@@ -1607,7 +1607,7 @@ def scheduler_loop():
     """
     global scheduled_job_data, last_scheduled_minute
 
-    print("Scheduler thread started.")
+    print("Scheduler thread started.", flush=True)
     while True:
         try:
             now = datetime.now()
@@ -1629,7 +1629,7 @@ def scheduler_loop():
             for sch in schedules:
                 # 曜日と時刻が一致するか
                 if sch["Day"] == current_day and sch["time"] == current_time:
-                    print(f"Schedule Matched: {sch['name']} at {current_time}")
+                    print(f"Schedule Matched: {sch['name']} at {current_time}", flush=True)
                     
                     # 実行するジョブ情報をセット
                     scheduled_job_data = sch
@@ -1644,7 +1644,7 @@ def scheduler_loop():
             time.sleep(1) # CPU負荷軽減
 
         except Exception as e:
-            print(f"Scheduler Error: {e}")
+            print(f"Scheduler Error: {e}", flush=True)
             time.sleep(5)
 
 # ==========================================
@@ -1666,9 +1666,9 @@ def main():
             bno.offsets_gyroscope = tuple(saved_offsets["gyro"])
             bno.offsets_magnetometer = tuple(saved_offsets["mag"])
             time.sleep(0.05)
-            print("BNOプロファイルを読み込みました。")
+            print("BNOプロファイルを読み込みました。", flush=True)
         else:
-            print(f"警告: {PROFILE_FILE} が見つかりません。")
+            print(f"警告: {PROFILE_FILE} が見つかりません。", flush=True)
         
         bno.mode = adafruit_bno055.NDOF_MODE
         time.sleep(1)
@@ -1677,7 +1677,7 @@ def main():
 
         start_raw_heading = get_bno_heading(bno)
         if start_raw_heading is None:
-            print("BNOエラー")
+            print("BNOエラー", flush=True)
             return
 
         start_map_heading = (start_raw_heading - ROBOT_CONFIG["bno_offset_deg"]) % 360
@@ -1702,7 +1702,7 @@ def main():
         # 既存のスレッド: 位置監視
         monitor_thread = threading.Thread(target=monitor_position, args=(robot, bno, pmw), daemon=True)
         monitor_thread.start()
-        print("位置監視システムを開始しました。")
+        print("位置監視システムを開始しました。", flush=True)
 
         # 既存のスレッド: APIサーバー
         def run_api():
@@ -1752,7 +1752,7 @@ def main():
                 current_task = move_queue.get()
                 
                 if current_task == AUTOMOVE:
-                    print("auto move start")
+                    print("auto move start", flush=True)
                     move_to_target(planner, robot, bno, pmw, target_pose)
                 
                 # Manual Pick Table Logic
@@ -1781,20 +1781,20 @@ def main():
                                 holding_table_id = pick_table(reserved_table_id)
                             
                         except Exception as e:
-                            print(f"Pick Table Error: {e}")
+                            print(f"Pick Table Error: {e}", flush=True)
                             set_motor_speed(0, 0)
                     else:
-                        print("Stocker not found")
+                        print("Stocker not found", flush=True)
 
                 # Schedule Execution Logic
                 if current_task == SCHEDULE_ACTION and scheduled_job_data is not None:
-                    print(f"Executing Schedule: {scheduled_job_data['name']}")
+                    print(f"Executing Schedule: {scheduled_job_data['name']}", flush=True)
                     target_tbl_id = scheduled_job_data['tableId']
                     target_point_name = scheduled_job_data['position'] # saved_pointsのnameを取得
                     
                     # 1. Check Table Status & Pick if needed
                     if holding_table_id != target_tbl_id:
-                        print(f"Need table {target_tbl_id}, currently holding {holding_table_id}. Moving to Stocker.")
+                        print(f"Need table {target_tbl_id}, currently holding {holding_table_id}. Moving to Stocker.", flush=True)
                         if os.path.exists(STOCKER_FILE):
                             try:
                                 with open(STOCKER_FILE, 'r') as f:
@@ -1809,22 +1809,22 @@ def main():
                                 holding_table_id = new_id
                                 
                             except Exception as e:
-                                print(f"Schedule Pick Error: {e}")
+                                print(f"Schedule Pick Error: {e}", flush=True)
                         else:
-                            print("Stocker not configured, cannot pick table.")
+                            print("Stocker not configured, cannot pick table.", flush=True)
                     
                     # 2. Get Coordinate from Saved Points
                     point_data = get_saved_point_by_name(target_point_name)
                     if point_data:
                         target_coords = (point_data['x'], point_data['y'], point_data['angle'])
-                        print(f"Moving to schedule position '{target_point_name}': {target_coords}")
+                        print(f"Moving to schedule position '{target_point_name}': {target_coords}", flush=True)
                         move_to_target(planner, robot, bno, pmw, target_coords)
-                        print("Schedule Action Completed.")
+                        print("Schedule Action Completed.", flush=True)
                     else:
-                        print(f"Error: Target point '{target_point_name}' not found in saved_points.dat")
+                        print(f"Error: Target point '{target_point_name}' not found in saved_points.dat", flush=True)
 
     except KeyboardInterrupt:
-        print("\n停止")
+        print("\n停止", flush=True)
     finally:
         set_motor_speed(0, 0)
         GPIO.cleanup()
