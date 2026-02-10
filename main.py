@@ -114,6 +114,8 @@ LINEAR_IN2 = 6
 
 SENSOR_HEIGHT_MM = 95.0
 
+LEFT_MOTOR_GAIN = 0.90
+
 # Command Constants
 AUTOMOVE = 1
 PICKTABLE = 2
@@ -533,6 +535,8 @@ def set_motor_speed(left_speed, right_speed, rotate=False, brake=False):
         pwm4.ChangeDutyCycle(100)
         return
     
+    left_speed = left_speed * LEFT_MOTOR_GAIN
+
     left_duty = max(-100, min(100, left_speed))
     right_duty = max(-100, min(100, right_speed))
     
@@ -570,7 +574,7 @@ def move_distance_mm(dist_mm: float, speed: float = BASE_SPEED):
     
     # 補正用ゲイン（直進時のふらつきを抑えるための係数）
     # KP_TURNだと回転用で強すぎる場合があるため、必要に応じて調整してください
-    KP_STRAIGHT = 2.0
+    KP_STRAIGHT = 3.0
 
     with position_lock:
         start_x = robot.x
