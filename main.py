@@ -767,27 +767,32 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         vs.stop()
         return False
 
-    # --- 設定エリア ---
-    SCAN_RATIO_SQUARE = 0.3  # 青検知エリアの高さ（30%）
-    SCAN_RATIO_LINE   = 0.5  # 赤線監視エリアの高さ（50%）
+    # --- 設定エリア (GUI設定値) ---
+    # 青: 高さ 20% (0.20)
+    SCAN_RATIO_SQUARE = 0.20
+    # 赤: 高さ 50% (0.50)
+    SCAN_RATIO_LINE   = 0.50
     
-    # 位置設定（0.75=下寄り, 0.50=中央）
-    VERTICAL_POS_BLUE = 0.75 
-    VERTICAL_POS_RED  = 0.50 
+    # 位置設定: 両方とも画面中央 (0.50)
+    VERTICAL_POS_BLUE = 0.50
+    VERTICAL_POS_RED  = 0.50
 
     start_time = time.time()
     saved_debug_image = False
 
-    # --- 色設定（赤をより検出しやすく修正） ---
-    lower_blue = np.array([90, 40, 40])
-    upper_blue = np.array([150, 255, 255])
+    # --- 色設定 (GUI設定値) ---
+    # Blue: H(98-165), S(140-255), V(199-255)
+    lower_blue = np.array([98, 140, 199])
+    upper_blue = np.array([165, 255, 255])
     
-    # 赤色：彩度(S)と明度(V)の下限を40まで下げて、影や反射に強くする
-    lower_red1, upper_red1 = np.array([0, 40, 40]), np.array([10, 255, 255])
-    lower_red2, upper_red2 = np.array([160, 40, 40]), np.array([180, 255, 255])
+    # Red1: H(0-9), S(187-255), V(0-255)
+    lower_red1, upper_red1 = np.array([0, 187, 0]), np.array([9, 255, 255])
+    
+    # Red2: H(162-180), S(187-255), V(0-255)
+    lower_red2, upper_red2 = np.array([162, 187, 0]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Pixel Count Check Added). Timeout: {timeout_sec}s", flush=True)
+    print(f"Monitoring started (Settings Updated). Timeout: {timeout_sec}s", flush=True)
 
     try:
         while True:
@@ -801,16 +806,20 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
             # --- ROI（関心領域）の計算 ---
             height, width = frame.shape[:2]
+            
+            # 左半分のみを使用
+            half_width = width // 2
+            
             center_y = height // 2
             display_frame = frame.copy()
 
-            # 1. 青四角用（下寄り）
+            # 1. 青四角用（画面中央 0.50 を基準、高さ 0.20）
             center_y_blue = int(height * VERTICAL_POS_BLUE)
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
             top_sq = center_y_blue - (scan_h_sq // 2)
             bottom_sq = center_y_blue + (scan_h_sq // 2)
 
-            # 2. 赤線用（中央）
+            # 2. 赤線用（画面中央 0.50 を基準、高さ 0.50）
             center_y_red = int(height * VERTICAL_POS_RED)
             scan_h_li = int(height * SCAN_RATIO_LINE)
             top_li = center_y_red - (scan_h_li // 2)
@@ -822,18 +831,19 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             top_li = max(0, top_li)
             bottom_li = min(height, bottom_li)
 
-            # --- ガイド枠の描画 ---
-            cv2.rectangle(display_frame, (0, top_li), (width, bottom_li), (0, 255, 255), 1) # 黄枠(赤監視)
-            cv2.rectangle(display_frame, (0, top_sq), (width, bottom_sq), (255, 255, 255), 1) # 白枠(青監視)
+            # --- ガイド枠の描画（確認用） ---
+            # 左半分のみに枠を描画
+            cv2.rectangle(display_frame, (0, top_li), (half_width, bottom_li), (0, 255, 255), 1) # 黄色：赤監視
+            cv2.rectangle(display_frame, (0, top_sq), (half_width, bottom_sq), (255, 255, 255), 1) # 白色：青検知
 
             if not saved_debug_image:
                 cv2.imwrite("debug_view.jpg", display_frame)
                 print("Debug image saved to 'debug_view.jpg'.", flush=True)
                 saved_debug_image = True
 
-            # ROI切り出し
-            roi_sq = frame[top_sq:bottom_sq, 0:width]
-            roi_li = frame[top_li:bottom_li, 0:width]
+            # ROI切り出し（左半分 0:half_width のみ）
+            roi_sq = frame[top_sq:bottom_sq, 0:half_width]
+            roi_li = frame[top_li:bottom_li, 0:half_width]
             
             # 画像処理
             hsv_sq = cv2.cvtColor(roi_sq, cv2.COLOR_BGR2HSV)
@@ -852,29 +862,24 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             blue_rects = find_shape_info(mask_blue, is_line=False)
             has_blue = len(blue_rects) > 0
 
-            # 2. 赤色の検出（2つの方法でチェック）
+            # 2. 赤色の検出
             # A: 形（横長）でチェック
             red_lines = find_shape_info(mask_red, is_line=True)
             has_red_shape = len(red_lines) > 0
             
-            # B: ★追加★ ピクセル総数でチェック（バーコードで分断されていても検知するため）
-            # 赤監視エリア全体の面積に対して、赤色ピクセルがどれくらいあるか
+            # B: ピクセル総数でチェック
             red_pixel_count = cv2.countNonZero(mask_red)
-            # 閾値設定: 画面幅 x 監視高さ の 1% 以上が赤なら「赤あり」とみなす
-            # 例: 640x240エリアなら約1500ピクセル以上
-            red_pixel_threshold = (width * scan_h_li) * 0.01 
+            red_pixel_threshold = (half_width * scan_h_li) * 0.01 
             has_red_pixels = red_pixel_count > red_pixel_threshold
 
-            # 赤検知の最終判定（形 または 量）
             is_red_detected = has_red_shape or has_red_pixels
 
             if has_blue:
                 if is_red_detected:
                     # 赤（禁止エリア）があるので無視
-                    # print(f"Red detected (Shape:{has_red_shape}, Pixels:{red_pixel_count}) -> Ignored", flush=True)
                     continue
                 else:
-                    print(f"\nSuccess: Blue detected at {blue_rects[0]['cx']}", flush=True)
+                    print(f"\nSuccess: Blue detected at x={blue_rects[0]['cx']} (in left half)", flush=True)
                     return True
             
             time.sleep(0.01)
@@ -899,6 +904,7 @@ def find_shape_info(mask, is_line=False):
             found.append({'cx': x + w // 2})
             
     return found
+
 def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
     """
     JANコード読み取り（強化版）。
