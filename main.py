@@ -115,7 +115,7 @@ LINEAR_IN2 = 6
 
 SENSOR_HEIGHT_MM = 95.0
 
-LEFT_MOTOR_GAIN = 0.94
+LEFT_MOTOR_GAIN = 0.91
 # Command Constants
 AUTOMOVE = 1
 PICKTABLE = 2
@@ -1122,14 +1122,14 @@ def return_table():
         time.sleep(0.5)
         move_linear(1)
         start_time = time.time()
-        time.sleep(1)
+        time.sleep(2.5)
         move_linear(0)
         arduino.send_command('r')
         time.sleep(1)
         arduino.send_command('o')
         time.sleep(5)
         move_linear(-1)
-        time.sleep(2.5)
+        time.sleep(3)
         move_linear(0)
         arduino.send_command('c')
         time.sleep(5)
@@ -1171,7 +1171,7 @@ def pick_table(target_table_id: str):
         move_linear(0)
         time.sleep(0.5)
         move_linear(-1)
-        time.sleep(1.5)
+        time.sleep(2)
         move_linear(0)
         arduino.send_command('r')
         move_distance_mm(50, speed=80)
@@ -1179,7 +1179,7 @@ def pick_table(target_table_id: str):
         arduino.send_command('o')
         time.sleep(5)
         move_linear(1)
-        time.sleep(2)
+        time.sleep(2.5)
         move_linear(0)
         move_distance_mm(-50, speed=80)
         time.sleep(1)
