@@ -115,7 +115,7 @@ LINEAR_IN2 = 6
 
 SENSOR_HEIGHT_MM = 95.0
 
-LEFT_MOTOR_GAIN = 0.91
+LEFT_MOTOR_GAIN = 0.87
 # Command Constants
 AUTOMOVE = 1
 PICKTABLE = 2
@@ -1129,7 +1129,7 @@ def return_table():
         arduino.send_command('o')
         time.sleep(5)
         move_linear(-1)
-        time.sleep(3)
+        time.sleep(4)
         move_linear(0)
         arduino.send_command('c')
         time.sleep(5)
