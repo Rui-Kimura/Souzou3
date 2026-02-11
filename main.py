@@ -80,6 +80,7 @@ class I2C6_Wrapper:
 # ==========================================
 
 IS_DEMO = False
+IS_DEMO_MOVE = True
 
 SAVED_POINTS_FILE = "saved_points.dat"
 STOCKER_FILE = "stocker.dat"
@@ -1583,10 +1584,12 @@ def is_demo():
     return IS_DEMO
 
 @app.get("/set_is_demo")
-def set_is_demo(mode: bool):
+def set_is_demo(mode: bool,move: bool):
     global IS_DEMO
+    global IS_DEMO_MOVE
     IS_DEMO = mode
-    print(f"Demo Mode: {IS_DEMO}", flush=True)
+    IS_DEMO_MOVE = move
+    print(f"Demo Mode: {IS_DEMO}, Move:{IS_DEMO_MOVE}", flush=True)
     return {"demo_mode": IS_DEMO}
 
 # ==========================================
@@ -1762,9 +1765,11 @@ def main():
                             is_at_ang = abs(diff) < TURN_THRESHOLD_DEG
 
                             if IS_DEMO:
-                                move_distance_mm(500,100)
+                                if IS_DEMO_MOVE:
+                                    move_distance_mm(500,100)
                                 holding_table_id = pick_table(reserved_table_id)
-                                move_distance_mm(-500,100)
+                                if IS_DEMO_MOVE:
+                                    move_distance_mm(-500,100)
                             elif (is_at_pos and is_at_ang):
                                 holding_table_id = pick_table(reserved_table_id)
                             else:

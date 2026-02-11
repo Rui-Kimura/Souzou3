@@ -24,6 +24,9 @@ import {
   DialogContentText,
   DialogActions,
   Switch,
+  Checkbox,
+  SxProps,
+  Theme,
 } from '@mui/material';
 
 import {
@@ -34,6 +37,7 @@ import {
   Settings as SettingsIcon,
   PowerSettingsNew as PowerIcon,
   Gamepad as GamepadIcon,
+  OpenWith as MoveIcon,
 } from '@mui/icons-material';
 
 interface SettingItem {
@@ -43,6 +47,8 @@ interface SettingItem {
   icon: React.ReactNode;
   action?: React.ReactNode;
   loading?: boolean;
+  disabled?: boolean;
+  sx?: SxProps<Theme>;
 }
 
 interface SettingSection {
@@ -56,8 +62,9 @@ export default function SettingsPage() {
   const [loadingIp, setLoadingIp] = useState<boolean>(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
   const [demoMode, setDemoMode] = useState<boolean>(false);
+  const [demoMove, setDemoMove] = useState<boolean>(false);
   const [loadingDemoMode, setLoadingDemoMode] = useState<boolean>(false);
-  
+
   const [shutdownDialogOpen, setShutdownDialogOpen] = useState(false);
 
   const fetchIpAddress = async () => {
@@ -96,11 +103,25 @@ export default function SettingsPage() {
 
   const setDemoModeState = async (mode: boolean) => {
     setLoadingDemoMode(true);
+    const move = mode ? true : false;
     try {
-      await fetch(`/api/local/set_is_demo?mode=${mode}`);
+      await fetch(`/api/local/set_is_demo?mode=${mode}&move=${move}`);
       setDemoMode(mode);
+      setDemoMove(move);
     } catch (error) {
       console.error('Demo mode set failed', error);
+    } finally {
+      setLoadingDemoMode(false);
+    }
+  };
+
+  const setDemoMoveState = async (move: boolean) => {
+    setLoadingDemoMode(true);
+    try {
+      await fetch(`/api/local/set_is_demo?mode=${demoMode}&move=${move}`);
+      setDemoMove(move);
+    } catch (error) {
+      console.error('Demo move set failed', error);
     } finally {
       setLoadingDemoMode(false);
     }
@@ -138,7 +159,7 @@ export default function SettingsPage() {
           loading: loadingIp,
           action: (
             <Box>
-               <Tooltip title="再取得">
+              <Tooltip title="再取得">
                 <IconButton edge="end" onClick={fetchIpAddress} sx={{ mr: 1 }}>
                   <RefreshIcon />
                 </IconButton>
@@ -159,12 +180,11 @@ export default function SettingsPage() {
         {
           id: 'version',
           label: 'バージョン',
-          value: 'v'+ version,
+          value: 'v' + version,
           icon: <InfoIcon />,
         },
       ],
     },
-    // 追加: システムセクション
     {
       title: 'システム',
       items: [
@@ -183,15 +203,30 @@ export default function SettingsPage() {
           loading: loadingDemoMode,
         },
         {
+          id: 'demo-move',
+          label: '移動',
+          value: demoMove ? 'オン' : 'オフ',
+          icon: <MoveIcon />,
+          disabled: !demoMode,
+          sx: { pl: 4 },
+          action: (
+            <Checkbox
+              checked={demoMove}
+              onChange={(e) => setDemoMoveState(e.target.checked)}
+              disabled={!demoMode || loadingDemoMode}
+            />
+          ),
+        },
+        {
           id: 'shutdown',
           label: 'シャットダウン',
           value: '',
-          icon: <PowerIcon color="error" />, 
+          icon: <PowerIcon color="error" />,
           action: (
-            <Button 
-              variant="contained" 
-              color="error" 
-              size="small" 
+            <Button
+              variant="contained"
+              color="error"
+              size="small"
               onClick={() => setShutdownDialogOpen(true)}
               startIcon={<PowerIcon />}
             >
@@ -227,23 +262,33 @@ export default function SettingsPage() {
                 {section.items.map((item, itemIndex) => (
                   <React.Fragment key={item.id}>
                     {itemIndex > 0 && <Divider component="li" />}
-                    <ListItem 
-                      sx={{ py: 2 }}
+                    <ListItem
+                      sx={[
+                        { py: 2 },
+                        ...(item.sx ? (Array.isArray(item.sx) ? item.sx : [item.sx]) : [])
+                      ]}
                       secondaryAction={item.action}
                     >
-                      <ListItemIcon sx={{ color: 'primary.main' }}>
+                      <ListItemIcon sx={{ color: item.disabled ? 'action.disabled' : 'primary.main' }}>
                         {item.icon}
                       </ListItemIcon>
-                      
+
                       <ListItemText
-                        primary={item.label}
+                        primary={
+                          <Typography
+                            variant="body1"
+                            color={item.disabled ? 'text.disabled' : 'text.primary'}
+                          >
+                            {item.label}
+                          </Typography>
+                        }
                         secondary={
                           item.loading ? (
                             <Box component="span" sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}>
-                               <CircularProgress size={16} sx={{ mr: 1, color: 'primary.main' }} />
-                               <Typography component="span" variant="caption">取得中...</Typography>
+                              <CircularProgress size={16} sx={{ mr: 1, color: 'primary.main' }} />
+                              <Typography component="span" variant="caption">取得中...</Typography>
                             </Box>
-                          ) : item.value ? ( 
+                          ) : item.value ? (
                             <Typography component="span" variant="body1" sx={{ fontWeight: 500, mt: 0.5, display: 'block' }}>
                               {item.value}
                             </Typography>
