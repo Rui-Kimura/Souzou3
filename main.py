@@ -758,6 +758,7 @@ class WebcamVideoStream:
         self.stream.release()
 
 # --- メイン処理関数 ---
+# --- メイン処理関数 ---
 def find_empty_stock(camera_id=0, timeout_sec=25):
     vs = WebcamVideoStream(src=camera_id).start()
     time.sleep(1.0)
@@ -769,7 +770,11 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
     # --- 設定エリア ---
     SCAN_RATIO_SQUARE = 0.3  # 青検知エリアの高さ（30%）
-    SCAN_RATIO_LINE   = 0.7
+    SCAN_RATIO_LINE   = 0.7  # 赤線監視エリアの高さ（70%）
+    
+    # ★追加：検知位置の基準（0.0=上, 0.5=中央, 1.0=下）
+    VERTICAL_POS_BLUE = 0.75 # 青は「下の方」を見る
+    VERTICAL_POS_RED  = 0.50 # 赤は「中央」を見る
     
     start_time = time.time()
     saved_debug_image = False
@@ -782,7 +787,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     lower_red2, upper_red2 = np.array([170, 100, 60]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Center Focus). Timeout: {timeout_sec}s", flush=True)
+    print(f"Monitoring started (Blue: Bottom / Red: Wide Center). Timeout: {timeout_sec}s", flush=True)
 
     try:
         while True:
@@ -794,20 +799,22 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             frame = vs.read()
             if frame is None: continue
 
-            # --- ROI（関心領域）の計算 ---
             height, width = frame.shape[:2]
-            center_y = height // 2
             display_frame = frame.copy()
 
-            # 1. 青四角用（狭いエリア）
+            # --- ROI（関心領域）の計算 ---
+            
+            # 1. 青四角用（画面下寄り 0.75 を基準）
+            center_y_blue = int(height * VERTICAL_POS_BLUE)
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
-            top_sq = center_y - (scan_h_sq // 2)
-            bottom_sq = center_y + (scan_h_sq // 2)
+            top_sq = center_y_blue - (scan_h_sq // 2)
+            bottom_sq = center_y_blue + (scan_h_sq // 2)
 
-            # 2. 赤線用（広いエリア）
+            # 2. 赤線用（画面中央 0.50 を基準）
+            center_y_red = int(height * VERTICAL_POS_RED)
             scan_h_li = int(height * SCAN_RATIO_LINE)
-            top_li = center_y - (scan_h_li // 2)
-            bottom_li = center_y + (scan_h_li // 2)
+            top_li = center_y_red - (scan_h_li // 2)
+            bottom_li = center_y_red + (scan_h_li // 2)
 
             # 画面外エラー回避
             top_sq = max(0, top_sq)
@@ -816,9 +823,9 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             bottom_li = min(height, bottom_li)
 
             # --- ガイド枠の描画 ---
-            # 黄色枠：赤線監視エリア（広い）
+            # 黄色枠：赤線監視エリア（広い・中央）
             cv2.rectangle(display_frame, (0, top_li), (width, bottom_li), (0, 255, 255), 1)
-            # 白色枠：青検知エリア（狭い）
+            # 白色枠：青検知エリア（狭い・下寄り）
             cv2.rectangle(display_frame, (0, top_sq), (width, bottom_sq), (255, 255, 255), 1)
 
             if not saved_debug_image:
@@ -851,7 +858,7 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
             if has_blue:
                 if has_red_line:
-                    # 赤線がある場合は無視（移動中または禁止エリア）
+                    # 赤線がある場合は無視
                     # print("Red detected -> Ignored", flush=True)
                     continue
                 else:
@@ -879,7 +886,6 @@ def find_shape_info(mask, is_line=False):
             found.append({'cx': x + w // 2})
             
     return found
-
 def get_jan_code_value(camera_id=0, timeout_sec=25, target_id=None):
     """
     JANコード読み取り（強化版）。
