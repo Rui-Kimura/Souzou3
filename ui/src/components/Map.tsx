@@ -468,7 +468,9 @@ export default function Map() {
   };
 
   const playerPixelX = (position_x / TILE_WIDTH) * TILE_SIZE;
-  const playerPixelY = (position_y / TILE_WIDTH) * TILE_SIZE;
+  const mapHeight = mapdata.length > 0 ? mapdata.length * TILE_WIDTH : 0;
+  const playerPixelY = mapdata.length > 0 ? ((mapHeight - position_y) / TILE_WIDTH) * TILE_SIZE : 0;
+
   const targetPixelX = (target_x / TILE_WIDTH) * TILE_SIZE;
   const targetPixelY = (target_y / TILE_WIDTH) * TILE_SIZE;
   const iconSize = TILE_SIZE * 2.5; 
@@ -513,7 +515,7 @@ export default function Map() {
                 borderBottom: `${iconSize}px solid`, 
                 borderBottomColor: "error.main", 
                 left: playerPixelX + 10, top: playerPixelY + 10,
-                transform: `translate(-50%, -50%) rotate(${position_angle}deg)`,
+                transform: `translate(-50%, -50%) rotate(${-position_angle}deg)`,
                 zIndex: 20, pointerEvents: "none", transition: "all 0.1s ease-out"
               }}
             />
@@ -598,13 +600,12 @@ export default function Map() {
                         pointerEvents: "none", zIndex: 100,
                     }}
                  >
-                     <Box sx={{ position:"absolute", width:14, height:14, bgcolor:"info.main", transform:"translate(-50%,-50%)", zIndex:102, borderRadius: "50%" }} />
+                      <Box sx={{ position:"absolute", width:14, height:14, bgcolor:"info.main", transform:"translate(-50%,-50%)", zIndex:102, borderRadius: "50%" }} />
                  </Box>
              )}
 
           </Box>
         </Card>
-
         <Popover
           open={openPopover} anchorEl={anchorEl} onClose={handlePopoverClose}
           anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} transformOrigin={{ vertical: 'top', horizontal: 'center' }}
