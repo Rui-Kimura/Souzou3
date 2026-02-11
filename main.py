@@ -1279,6 +1279,11 @@ def shutdown():
     os.system("sudo shutdown -h now")
     return {}
 
+@app.get("/restart")
+def restart():
+    os.system("./restart_pm2.sh")
+    return {}
+
 @app.get("/version")
 def get_version():
     try:

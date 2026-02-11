@@ -38,6 +38,7 @@ import {
   PowerSettingsNew as PowerIcon,
   Gamepad as GamepadIcon,
   OpenWith as MoveIcon,
+  RestartAlt as RestartAltIcon, // 追加: 再起動用アイコン
 } from '@mui/icons-material';
 
 interface SettingItem {
@@ -64,8 +65,9 @@ export default function SettingsPage() {
   const [demoMode, setDemoMode] = useState<boolean>(false);
   const [demoMove, setDemoMove] = useState<boolean>(false);
   const [loadingDemoMode, setLoadingDemoMode] = useState<boolean>(false);
-
+  
   const [shutdownDialogOpen, setShutdownDialogOpen] = useState(false);
+  const [restartDialogOpen, setRestartDialogOpen] = useState(false); // 追加: 再起動ダイアログ用State
 
   const fetchIpAddress = async () => {
     setLoadingIp(true);
@@ -147,6 +149,16 @@ export default function SettingsPage() {
     }
   };
 
+  // 追加: 再起動実行関数
+  const executeRestart = async () => {
+    setRestartDialogOpen(false);
+    try {
+      await fetch('/api/local/restart');
+    } catch (error) {
+      console.error('Restart request failed', error);
+    }
+  };
+
   const settingsConfig: SettingSection[] = [
     {
       title: 'ネットワーク情報',
@@ -215,6 +227,24 @@ export default function SettingsPage() {
               onChange={(e) => setDemoMoveState(e.target.checked)}
               disabled={!demoMode || loadingDemoMode}
             />
+          ),
+        },
+        // 追加: ソフトウェア再起動
+        {
+          id: 'restart',
+          label: 'ソフトウェア再起動',
+          value: '',
+          icon: <RestartAltIcon color="warning" />,
+          action: (
+            <Button
+              variant="contained"
+              color="warning"
+              size="small"
+              onClick={() => setRestartDialogOpen(true)}
+              startIcon={<RestartAltIcon />}
+            >
+              実行
+            </Button>
           ),
         },
         {
@@ -314,6 +344,32 @@ export default function SettingsPage() {
           クリップボードにコピーしました
         </Alert>
       </Snackbar>
+
+      {/* 追加: 再起動ダイアログ */}
+      <Dialog
+        open={restartDialogOpen}
+        onClose={() => setRestartDialogOpen(false)}
+        aria-labelledby="restart-dialog-title"
+        aria-describedby="restart-dialog-description"
+      >
+        <DialogTitle id="restart-dialog-title">
+          ソフトウェアの再起動
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText id="restart-dialog-description">
+            ソフトウェアを再起動しますか？<br />
+            一時的にシステムが利用できなくなります。
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRestartDialogOpen(false)} color="primary">
+            キャンセル
+          </Button>
+          <Button onClick={executeRestart} color="warning" variant="contained" autoFocus>
+            はい
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog
         open={shutdownDialogOpen}
