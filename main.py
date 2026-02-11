@@ -115,8 +115,7 @@ LINEAR_IN2 = 6
 
 SENSOR_HEIGHT_MM = 95.0
 
-LEFT_MOTOR_GAIN = 0.90
-
+LEFT_MOTOR_GAIN = 0.94
 # Command Constants
 AUTOMOVE = 1
 PICKTABLE = 2
@@ -1119,7 +1118,7 @@ def return_table():
         print("空いている棚を発見しました。テーブルを戻します。", flush=True)
         move_linear(0)
         time.sleep(0.5)
-        move_distance_mm(20, speed=80)
+        move_distance_mm(50, speed=80)
         time.sleep(0.5)
         move_linear(1)
         start_time = time.time()
@@ -1134,7 +1133,7 @@ def return_table():
         move_linear(0)
         arduino.send_command('c')
         time.sleep(5)
-        move_distance_mm(-20, speed=80)
+        move_distance_mm(-50, speed=80)
         time.sleep(1)
         move_linear(-1)
         elapsed_time = time.time() - start_time
@@ -1162,7 +1161,6 @@ def pick_table(target_table_id: str):
     start_time = time.time()
     detected_id = get_jan_code_value(target_id=target_table_id)
     
-    
     if detected_id is None:
         print("テーブルが発見できませんでした。", flush=True)
         move_linear(-1)
@@ -1176,7 +1174,7 @@ def pick_table(target_table_id: str):
         time.sleep(1.5)
         move_linear(0)
         arduino.send_command('r')
-        move_distance_mm(20, speed=80)
+        move_distance_mm(50, speed=80)
         time.sleep(1)
         arduino.send_command('o')
         time.sleep(5)
