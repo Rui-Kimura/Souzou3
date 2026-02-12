@@ -769,9 +769,9 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
     # --- 設定エリア (GUI設定値維持) ---
     SCAN_RATIO_SQUARE = 0.20
-    SCAN_RATIO_LINE   = 0.63
+    SCAN_RATIO_LINE   = 0.50
     VERTICAL_POS_BLUE = 0.50
-    VERTICAL_POS_RED  = 0.45
+    VERTICAL_POS_RED  = 0.50
 
     start_time = time.time()
     saved_debug_image = False
@@ -883,7 +883,7 @@ def find_shape_info(mask, is_line=False):
     found = []
     for cnt in contours:
         # ★変更: 検出する最小面積を100から500に上げて、小さなノイズを無視する
-        if cv2.contourArea(cnt) < 900: 
+        if cv2.contourArea(cnt) < 700: 
             continue
         
         x, y, w, h = cv2.boundingRect(cnt)
