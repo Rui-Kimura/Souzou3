@@ -769,9 +769,9 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
     # --- 設定エリア (GUI設定値維持) ---
     SCAN_RATIO_SQUARE = 0.20
-    SCAN_RATIO_LINE   = 0.50
-    VERTICAL_POS_BLUE = 0.50
-    VERTICAL_POS_RED  = 0.50
+    SCAN_RATIO_LINE   = 0.60
+    VERTICAL_POS_BLUE = 0.60
+    VERTICAL_POS_RED  = 0.45
 
     start_time = time.time()
     saved_debug_image = False
