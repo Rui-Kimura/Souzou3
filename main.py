@@ -757,6 +757,7 @@ class WebcamVideoStream:
         self.stream.release()
 
 # --- メイン処理関数 ---
+# --- メイン処理関数 ---
 def find_empty_stock(camera_id=0, timeout_sec=25):
     vs = WebcamVideoStream(src=camera_id).start()
     time.sleep(1.0)
@@ -766,32 +767,28 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
         vs.stop()
         return False
 
-    # --- 設定エリア (GUI設定値) ---
-    # 青: 高さ 20% (0.20)
+    # --- 設定エリア (GUI設定値維持) ---
     SCAN_RATIO_SQUARE = 0.20
-    # 赤: 高さ 50% (0.50)
     SCAN_RATIO_LINE   = 0.50
-    
-    # 位置設定: 両方とも画面中央 (0.50)
     VERTICAL_POS_BLUE = 0.50
     VERTICAL_POS_RED  = 0.50
 
     start_time = time.time()
     saved_debug_image = False
 
-    # --- 色設定 (GUI設定値) ---
-    # Blue: H(98-165), S(140-255), V(199-255)
-    lower_blue = np.array([98, 140, 199])
-    upper_blue = np.array([165, 255, 255])
+    # --- 色設定 (GUI設定値維持) ---
+    # Blue: H(98-148), S(82-255), V(136-255)
+    lower_blue = np.array([98, 82, 136])
+    upper_blue = np.array([148, 255, 255])
     
-    # Red1: H(0-9), S(187-255), V(0-255)
-    lower_red1, upper_red1 = np.array([0, 187, 0]), np.array([9, 255, 255])
+    # Red1: H(0-63), S(214-255), V(148-255)
+    lower_red1, upper_red1 = np.array([0, 214, 148]), np.array([63, 255, 255])
     
-    # Red2: H(162-180), S(187-255), V(0-255)
-    lower_red2, upper_red2 = np.array([162, 187, 0]), np.array([180, 255, 255])
+    # Red2: H(160-180), S(214-255), V(148-255)
+    lower_red2, upper_red2 = np.array([160, 214, 148]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
-    print(f"Monitoring started (Settings Updated). Timeout: {timeout_sec}s", flush=True)
+    print(f"Monitoring started (Area Filter Increased). Timeout: {timeout_sec}s", flush=True)
 
     try:
         while True:
@@ -805,20 +802,17 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
             # --- ROI（関心領域）の計算 ---
             height, width = frame.shape[:2]
-            
-            # 左半分のみを使用
             half_width = width // 2
-            
             center_y = height // 2
             display_frame = frame.copy()
 
-            # 1. 青四角用（画面中央 0.50 を基準、高さ 0.20）
+            # 1. 青四角用
             center_y_blue = int(height * VERTICAL_POS_BLUE)
             scan_h_sq = int(height * SCAN_RATIO_SQUARE)
             top_sq = center_y_blue - (scan_h_sq // 2)
             bottom_sq = center_y_blue + (scan_h_sq // 2)
 
-            # 2. 赤線用（画面中央 0.50 を基準、高さ 0.50）
+            # 2. 赤線用
             center_y_red = int(height * VERTICAL_POS_RED)
             scan_h_li = int(height * SCAN_RATIO_LINE)
             top_li = center_y_red - (scan_h_li // 2)
@@ -830,17 +824,16 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
             top_li = max(0, top_li)
             bottom_li = min(height, bottom_li)
 
-            # --- ガイド枠の描画（確認用） ---
-            # 左半分のみに枠を描画
-            cv2.rectangle(display_frame, (0, top_li), (half_width, bottom_li), (0, 255, 255), 1) # 黄色：赤監視
-            cv2.rectangle(display_frame, (0, top_sq), (half_width, bottom_sq), (255, 255, 255), 1) # 白色：青検知
+            # --- ガイド枠の描画 ---
+            cv2.rectangle(display_frame, (0, top_li), (half_width, bottom_li), (0, 255, 255), 1)
+            cv2.rectangle(display_frame, (0, top_sq), (half_width, bottom_sq), (255, 255, 255), 1)
 
             if not saved_debug_image:
                 cv2.imwrite("debug_view.jpg", display_frame)
                 print("Debug image saved to 'debug_view.jpg'.", flush=True)
                 saved_debug_image = True
 
-            # ROI切り出し（左半分 0:half_width のみ）
+            # ROI切り出し（左半分のみ）
             roi_sq = frame[top_sq:bottom_sq, 0:half_width]
             roi_li = frame[top_li:bottom_li, 0:half_width]
             
@@ -875,7 +868,6 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
             if has_blue:
                 if is_red_detected:
-                    # 赤（禁止エリア）があるので無視
                     continue
                 else:
                     print(f"\nSuccess: Blue detected at x={blue_rects[0]['cx']} (in left half)", flush=True)
@@ -890,8 +882,10 @@ def find_shape_info(mask, is_line=False):
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     found = []
     for cnt in contours:
-        if cv2.contourArea(cnt) < 100: 
+        # ★変更: 検出する最小面積を100から500に上げて、小さなノイズを無視する
+        if cv2.contourArea(cnt) < 500: 
             continue
+        
         x, y, w, h = cv2.boundingRect(cnt)
         aspect = float(w) / h
         
