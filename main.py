@@ -769,9 +769,9 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
 
     # --- 設定エリア (GUI設定値維持) ---
     SCAN_RATIO_SQUARE = 0.20
-    SCAN_RATIO_LINE   = 0.50
+    SCAN_RATIO_LINE   = 0.63
     VERTICAL_POS_BLUE = 0.50
-    VERTICAL_POS_RED  = 0.50
+    VERTICAL_POS_RED  = 0.45
 
     start_time = time.time()
     saved_debug_image = False
@@ -782,10 +782,10 @@ def find_empty_stock(camera_id=0, timeout_sec=25):
     upper_blue = np.array([148, 255, 255])
     
     # Red1: H(0-63), S(214-255), V(148-255)
-    lower_red1, upper_red1 = np.array([0, 214, 148]), np.array([63, 255, 255])
+    lower_red1, upper_red1 = np.array([0, 100, 100]), np.array([20, 255, 255])
     
     # Red2: H(160-180), S(214-255), V(148-255)
-    lower_red2, upper_red2 = np.array([160, 214, 148]), np.array([180, 255, 255])
+    lower_red2, upper_red2 = np.array([160, 100, 100]), np.array([180, 255, 255])
 
     kernel = np.ones((5, 5), np.uint8)
     print(f"Monitoring started (Area Filter Increased). Timeout: {timeout_sec}s", flush=True)
@@ -883,7 +883,7 @@ def find_shape_info(mask, is_line=False):
     found = []
     for cnt in contours:
         # ★変更: 検出する最小面積を100から500に上げて、小さなノイズを無視する
-        if cv2.contourArea(cnt) < 500: 
+        if cv2.contourArea(cnt) < 900: 
             continue
         
         x, y, w, h = cv2.boundingRect(cnt)
